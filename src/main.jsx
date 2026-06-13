@@ -111,15 +111,12 @@ function App() {
           </button>
         </header>
 
-        <div className="role-tabs" aria-label="Escolher modo">
-          <button className={isPassenger ? 'active' : ''} onClick={() => setMode('passenger')}>
-            <UserRound size={16} />
-            Passageiro
-          </button>
-          <button className={!isPassenger ? 'active' : ''} onClick={() => setMode('driver')}>
-            <CarFront size={16} />
-            Motorista
-          </button>
+        <div className="environment-badge" aria-label="Ambiente ativo">
+          {isPassenger ? <UserRound size={17} /> : <CarFront size={17} />}
+          <div>
+            <small>Ambiente ativo</small>
+            <strong>{isPassenger ? 'Passageiro' : 'Motorista'}</strong>
+          </div>
         </div>
 
         <section className="map-card">
@@ -153,10 +150,21 @@ function App() {
         </section>
 
         <footer className="bottom-bar">
-          <button className="active"><Home size={20} /><span>Inicio</span></button>
-          <button><ShieldCheck size={20} /><span>Seguro</span></button>
-          <button><CreditCard size={20} /><span>Carteira</span></button>
-          <button><UserRound size={20} /><span>Perfil</span></button>
+          {isPassenger ? (
+            <>
+              <button className="active"><Home size={20} /><span>Inicio</span></button>
+              <button><ShieldCheck size={20} /><span>Seguro</span></button>
+              <button><CreditCard size={20} /><span>Carteira</span></button>
+              <button><UserRound size={20} /><span>Perfil</span></button>
+            </>
+          ) : (
+            <>
+              <button className="active"><Home size={20} /><span>Painel</span></button>
+              <button><RadioTower size={20} /><span>Demanda</span></button>
+              <button><CircleDollarSign size={20} /><span>Ganhos</span></button>
+              <button><UserRound size={20} /><span>Conta</span></button>
+            </>
+          )}
         </footer>
 
         <button className="main-cta">

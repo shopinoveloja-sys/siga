@@ -256,34 +256,34 @@ button {
   box-shadow: none;
 }
 
-.role-tabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 7px;
-  margin: 8px 18px 14px;
-  padding: 6px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.role-tabs button {
-  min-height: 42px;
+.environment-badge {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 0;
-  border-radius: 14px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.82);
-  font-weight: 700;
-  cursor: pointer;
+  gap: 12px;
+  margin: 8px 18px 14px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  color: white;
+  background: rgba(255, 255, 255, 0.16);
 }
 
-.role-tabs button.active {
-  color: var(--red-dark);
-  background: white;
-  box-shadow: 0 12px 22px rgba(92, 0, 13, 0.18);
+.environment-badge > svg {
+  flex: 0 0 auto;
+}
+
+.environment-badge small,
+.environment-badge strong {
+  display: block;
+}
+
+.environment-badge small {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.environment-badge strong {
+  font-size: 16px;
 }
 
 .map-card {
