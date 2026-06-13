@@ -26,16 +26,12 @@ import {
 import './styles.css';
 
 const rideOptions = [
-  { name: 'SIGA Pop', time: '4 min', price: 'R$ 22,90', note: 'economico' },
-  { name: 'SIGA Comfort', time: '2 min', price: 'R$ 31,40', note: 'recomendado' },
-  { name: 'SIGA Black', time: '6 min', price: 'R$ 48,90', note: 'premium' },
+  { name: 'SIGA Pop', time: '4 min', multiplier: 1, note: 'economico' },
+  { name: 'SIGA Comfort', time: '2 min', multiplier: 1.28, note: 'recomendado' },
+  { name: 'SIGA Black', time: '6 min', multiplier: 1.85, note: 'premium' },
 ];
 
-const passengerSteps = [
-  { label: 'Origem', value: 'Av. Paulista, 1578', icon: MapPin },
-  { label: 'Destino', value: 'Congonhas', icon: Navigation2 },
-  { label: 'Pagamento', value: 'Carteira SIGA', icon: WalletCards },
-];
+const paymentOptions = ['Pix', 'Cartao de credito', 'Carteira SIGA', 'Dinheiro'];
 
 const driverStats = [
   { label: 'Hoje', value: 'R$ 186', icon: CircleDollarSign },
@@ -59,24 +55,60 @@ const initialRide = {
   price: null,
   origin: 'Av. Paulista, 1578',
   destination: 'Congonhas',
+  paymentMethod: null,
+  distanceKm: null,
+  durationMin: null,
   driver: null,
   vehicle: null,
 };
+
+function estimateRoute(origin, destination, ride) {
+  const cleanOrigin = origin.trim();
+  const cleanDestination = destination.trim();
+  if (!cleanOrigin || !cleanDestination) {
+    return {
+      isReady: false,
+      distanceKm: 0,
+      durationMin: 0,
+      priceNumber: 0,
+      price: 'R$ 0,00',
+    };
+  }
+
+  const seed = `${cleanOrigin}|${cleanDestination}`.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const distanceKm = Math.max(2.4, Math.min(32, 3.2 + (seed % 220) / 10));
+  const durationMin = Math.round(distanceKm * 2.4 + 6);
+  const priceNumber = 6.5 + distanceKm * 2.35 * ride.multiplier + durationMin * 0.34;
+  return {
+    isReady: true,
+    distanceKm: distanceKm.toFixed(1),
+    durationMin,
+    priceNumber,
+    price: priceNumber.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+  };
+}
 
 function App() {
   const [entered, setEntered] = useState(false);
   const [mode, setMode] = useState('passenger');
   const [selectedRide, setSelectedRide] = useState(1);
   const [online, setOnline] = useState(true);
+  const [origin, setOrigin] = useState('Av. Paulista, 1578');
+  const [destination, setDestination] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('');
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
   const [ride, setRide] = useState(initialRide);
   const activeRide = rideOptions[selectedRide];
   const isPassenger = mode === 'passenger';
+  const estimate = useMemo(() => estimateRoute(origin, destination, activeRide), [origin, destination, activeRide]);
+  const canRequestRide = estimate.isReady && paymentMethod;
 
   const cta = useMemo(() => {
     if (isPassenger) {
-      if (ride.status === 'idle' || ride.status === 'cancelled' || ride.status === 'completed') return `Chamar ${activeRide.name}`;
+      if (ride.status === 'idle' || ride.status === 'cancelled' || ride.status === 'completed') {
+        return canRequestRide ? `Chamar ${activeRide.name}` : 'Preencha a corrida';
+      }
       if (ride.status === 'requested') return 'Aguardando motorista';
       if (ride.status === 'accepted') return 'Confirmar embarque';
       if (ride.status === 'arrived') return 'Motorista chegou';
@@ -88,7 +120,7 @@ function App() {
     if (ride.status === 'started') return 'Finalizar corrida';
     if (ride.status === 'completed' || ride.status === 'cancelled') return 'Limpar simulação';
     return online ? 'Receber corridas' : 'Ficar online';
-  }, [activeRide, isPassenger, online, ride.status]);
+  }, [activeRide, canRequestRide, isPassenger, online, ride.status]);
 
   useEffect(() => {
     const client = io();
@@ -149,9 +181,15 @@ function App() {
   function handleMainAction() {
     if (isPassenger) {
       if (ride.status === 'idle' || ride.status === 'cancelled' || ride.status === 'completed') {
+        if (!canRequestRide) return;
         emitRide('ride:request', {
           category: activeRide.name,
-          price: activeRide.price,
+          price: estimate.price,
+          origin: origin.trim(),
+          destination: destination.trim(),
+          paymentMethod,
+          distanceKm: estimate.distanceKm,
+          durationMin: String(estimate.durationMin),
         });
       }
       return;
@@ -265,6 +303,13 @@ function App() {
               ride={ride}
               connected={connected}
               emitRide={emitRide}
+              origin={origin}
+              setOrigin={setOrigin}
+              destination={destination}
+              setDestination={setDestination}
+              paymentMethod={paymentMethod}
+              setPaymentMethod={setPaymentMethod}
+              estimate={estimate}
             />
           ) : (
             <DriverView online={online} setOnline={setOnline} ride={ride} connected={connected} emitRide={emitRide} />
@@ -298,30 +343,71 @@ function App() {
   );
 }
 
-function PassengerView({ activeRide, selectedRide, setSelectedRide, ride, connected, emitRide }) {
+function PassengerView({
+  activeRide,
+  selectedRide,
+  setSelectedRide,
+  ride,
+  connected,
+  emitRide,
+  origin,
+  setOrigin,
+  destination,
+  setDestination,
+  paymentMethod,
+  setPaymentMethod,
+  estimate,
+}) {
   const hasActiveRide = !['idle', 'completed', 'cancelled'].includes(ride.status);
+  const passengerSteps = [
+    { label: 'Origem', value: origin || 'Informe a origem', icon: MapPin },
+    { label: 'Destino', value: destination || 'Informe o destino', icon: Navigation2 },
+    { label: 'Pagamento', value: paymentMethod || 'Escolha o pagamento', icon: WalletCards },
+  ];
 
   return (
     <>
       <div className="sheet-handle" />
       <RealtimeBanner connected={connected} ride={ride} />
-      <div className="destination-card">
-        <div className="point-line">
-          {passengerSteps.map((step) => (
-            <div className="point-item" key={step.label}>
-              <span><step.icon size={17} /></span>
-              <div>
-                <small>{step.label}</small>
-                <strong>{step.value}</strong>
+      {hasActiveRide ? (
+        <div className="destination-card">
+          <div className="point-line">
+            {passengerSteps.map((step) => (
+              <div className="point-item" key={step.label}>
+                <span><step.icon size={17} /></span>
+                <div>
+                  <small>{step.label}</small>
+                  <strong>{step.value}</strong>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="booking-form">
+          <label>
+            <span>Origem</span>
+            <input value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="Ex: Av. Paulista, 1578" />
+          </label>
+          <label>
+            <span>Destino</span>
+            <input value={destination} onChange={(event) => setDestination(event.target.value)} placeholder="Ex: Shopping Morumbi" />
+          </label>
+          <label>
+            <span>Pagamento</span>
+            <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
+              <option value="">Selecione</option>
+              {paymentOptions.map((option) => (
+                <option value={option} key={option}>{option}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
 
       <div className="section-title">
         <h1>{hasActiveRide ? rideLabels[ride.status] : 'Escolha sua corrida'}</h1>
-        <span>{hasActiveRide ? ride.price : activeRide.time}</span>
+        <span>{hasActiveRide ? ride.price : estimate.isReady ? estimate.price : activeRide.time}</span>
       </div>
 
       {hasActiveRide ? (
@@ -336,12 +422,20 @@ function PassengerView({ activeRide, selectedRide, setSelectedRide, ride, connec
             >
               <span className="ride-avatar"><CarFront size={21} /></span>
               <div>
-                <strong>{rideOption.name}</strong>
-                <small>{rideOption.time} de espera - {rideOption.note}</small>
-              </div>
-              <b>{rideOption.price}</b>
+              <strong>{rideOption.name}</strong>
+              <small>{rideOption.time} de espera - {rideOption.note}</small>
+            </div>
+              <b>{estimateRoute(origin, destination, rideOption).price}</b>
             </button>
           ))}
+        </div>
+      )}
+
+      {!hasActiveRide && estimate.isReady && (
+        <div className="fare-summary">
+          <span><Clock3 size={17} /> {estimate.durationMin} min</span>
+          <span><Navigation2 size={17} /> {estimate.distanceKm} km</span>
+          <strong>{paymentMethod || 'Escolha o pagamento'}</strong>
         </div>
       )}
 
@@ -349,7 +443,7 @@ function PassengerView({ activeRide, selectedRide, setSelectedRide, ride, connec
         <ShieldCheck size={22} />
         <div>
           <strong>Viagem protegida</strong>
-          <p>Codigo de embarque, rota compartilhada e suporte ativo durante toda a corrida.</p>
+          <p>Codigo de embarque, rota compartilhada, pagamento definido e suporte ativo durante toda a corrida.</p>
         </div>
       </article>
     </>
@@ -443,6 +537,25 @@ function RideStatusCard({ ride, emitRide, role }) {
       <div className="driver-mini-card">
         <strong>{ride.driver || 'Aguardando motorista'}</strong>
         <small>{ride.vehicle || 'A chamada ja esta visivel para o motorista.'}</small>
+      </div>
+
+      <div className="ride-detail-grid">
+        <div>
+          <small>Origem</small>
+          <strong>{ride.origin}</strong>
+        </div>
+        <div>
+          <small>Destino</small>
+          <strong>{ride.destination}</strong>
+        </div>
+        <div>
+          <small>Percurso</small>
+          <strong>{ride.distanceKm || '0'} km - {ride.durationMin || '0'} min</strong>
+        </div>
+        <div>
+          <small>Pagamento</small>
+          <strong>{ride.paymentMethod || 'Nao informado'}</strong>
+        </div>
       </div>
 
       <div className="ride-actions">

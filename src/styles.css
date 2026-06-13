@@ -491,6 +491,46 @@ button {
   padding: 14px;
 }
 
+.booking-form {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(227, 19, 44, 0.16);
+  border-radius: 22px;
+  background: #fffafb;
+}
+
+.booking-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.booking-form label span {
+  color: var(--red-dark);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.booking-form input,
+.booking-form select {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(227, 19, 44, 0.18);
+  border-radius: 15px;
+  padding: 0 12px;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  outline: none;
+}
+
+.booking-form input:focus,
+.booking-form select:focus {
+  border-color: var(--red);
+  box-shadow: 0 0 0 4px var(--red-soft);
+}
+
 .point-line {
   display: grid;
   gap: 12px;
@@ -574,6 +614,31 @@ button {
   color: var(--red-dark);
 }
 
+.fare-summary {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 18px;
+  background: var(--red-soft);
+  color: var(--red-dark);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.fare-summary span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.fare-summary strong {
+  justify-self: end;
+  text-align: right;
+}
+
 .ride-status-card {
   display: grid;
   gap: 14px;
@@ -650,6 +715,35 @@ button {
   padding: 12px;
   border-radius: 18px;
   background: var(--red-soft);
+}
+
+.ride-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.ride-detail-grid div {
+  padding: 11px;
+  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid rgba(227, 19, 44, 0.12);
+}
+
+.ride-detail-grid small,
+.ride-detail-grid strong {
+  display: block;
+}
+
+.ride-detail-grid small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.ride-detail-grid strong {
+  margin-top: 3px;
+  font-size: 13px;
 }
 
 .ride-actions {
@@ -937,8 +1031,15 @@ button {
 
 @media (max-width: 360px) {
   .driver-grid,
-  .quality-list {
+  .quality-list,
+  .ride-detail-grid,
+  .fare-summary {
     grid-template-columns: 1fr;
+  }
+
+  .fare-summary strong {
+    justify-self: start;
+    text-align: left;
   }
 
   .section-title h1 {
