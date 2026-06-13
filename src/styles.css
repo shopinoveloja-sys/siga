@@ -1215,6 +1215,32 @@ button {
   background-size: 52px 52px, 52px 52px, cover;
 }
 
+.google-map-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  min-height: 100%;
+}
+
+.map-loading {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  z-index: 3;
+  padding: 10px 12px;
+  border-radius: 14px;
+  color: #171114;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 10px 26px rgba(32, 4, 10, 0.18);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.map-warning {
+  color: var(--red-dark);
+}
+
 .map-street {
   position: absolute;
   height: 18px;

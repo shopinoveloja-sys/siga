@@ -154,6 +154,12 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true, status: ride.status });
 });
 
+app.get('/api/config', (_req, res) => {
+  res.json({
+    googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY || '',
+  });
+});
+
 app.get('/api/ride', (_req, res) => {
   res.json(ride);
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { io } from 'socket.io-client';
 import {
@@ -85,6 +85,41 @@ const simulatedDrivers = [
   { id: 'M4', name: 'Ana Costa', coords: [-23.615, -46.6518] },
 ];
 
+let googleMapsLoaderPromise = null;
+
+async function loadGoogleMaps() {
+  if (window.google?.maps) return window.google.maps;
+  if (googleMapsLoaderPromise) return googleMapsLoaderPromise;
+
+  googleMapsLoaderPromise = fetch('/api/config')
+    .then((response) => response.json())
+    .then((config) => {
+      if (!config.googleMapsApiKey) {
+        throw new Error('missing-key');
+      }
+
+      return new Promise((resolve, reject) => {
+        const existingScript = document.querySelector('script[data-siga-google-maps]');
+        if (existingScript) {
+          existingScript.addEventListener('load', () => resolve(window.google.maps), { once: true });
+          existingScript.addEventListener('error', reject, { once: true });
+          return;
+        }
+
+        const script = document.createElement('script');
+        script.dataset.sigaGoogleMaps = 'true';
+        script.async = true;
+        script.defer = true;
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(config.googleMapsApiKey)}&libraries=places,geometry&v=weekly`;
+        script.onload = () => resolve(window.google.maps);
+        script.onerror = () => reject(new Error('load-failed'));
+        document.head.appendChild(script);
+      });
+    });
+
+  return googleMapsLoaderPromise;
+}
+
 function distanceBetweenKm(a, b) {
   if (!a || !b) return 0;
   const toRad = (value) => (value * Math.PI) / 180;
@@ -170,32 +205,42 @@ function estimateRoute(origin, destination, ride) {
 
 function estimateRouteWithDriver(origin, destination, ride, routePreview) {
   const base = estimateRoute(origin, destination, ride);
+  const routeDistanceKm = Number(routePreview?.routeDistanceKm);
+  const routeDurationMin = Number(routePreview?.routeDurationMin);
+  const routeBase = routeDistanceKm > 0
+    ? {
+        ...base,
+        isReady: true,
+        distanceKm: routeDistanceKm.toFixed(1),
+        durationMin: Math.max(1, Math.round(routeDurationMin || routeDistanceKm * 2.4 + 6)),
+      }
+    : base;
   const originCoords = routePreview?.originCoords || fallbackCoords(origin, 0);
-  const selectedDriver = base.isReady ? findFarthestDriverWithinRadius(originCoords, 5) : null;
+  const selectedDriver = routeBase.isReady ? findFarthestDriverWithinRadius(originCoords, 5) : null;
 
-  if (!base.isReady) {
-    return { ...base, hasDriver: false, driver: null, price: 'Informe rota' };
+  if (!routeBase.isReady) {
+    return { ...routeBase, hasDriver: false, driver: null, price: 'Informe rota' };
   }
 
   if (!selectedDriver) {
     return {
-      ...base,
+      ...routeBase,
       hasDriver: false,
       driver: null,
       pickupDistanceKm: 0,
-      billableKm: Number(base.distanceKm).toFixed(1),
+      billableKm: Number(routeBase.distanceKm).toFixed(1),
       priceNumber: 0,
       price: 'Indisponivel',
     };
   }
 
   const pickupDistanceKm = selectedDriver.distanceKm;
-  const billableKm = Number(base.distanceKm) + pickupDistanceKm;
-  const durationMin = Math.round(Number(base.distanceKm) * 2.4 + pickupDistanceKm * 2.1 + 6);
+  const billableKm = Number(routeBase.distanceKm) + pickupDistanceKm;
+  const durationMin = Math.round(Number(routeBase.durationMin) + pickupDistanceKm * 2.1);
   const priceNumber = billableKm * ride.ratePerKm;
 
   return {
-    ...base,
+    ...routeBase,
     hasDriver: true,
     driver: selectedDriver,
     pickupDistanceKm: pickupDistanceKm.toFixed(1),
@@ -409,11 +454,13 @@ function App() {
       passengerStage={passengerStage}
       paymentMethod={paymentMethod}
       ride={ride}
+      routePreview={routePreview}
       selectedRide={selectedRide}
       setDestination={setDestination}
       setOrigin={setOrigin}
       setPassengerStage={setPassengerStage}
       setPaymentMethod={setPaymentMethod}
+      setRoutePreview={setRoutePreview}
       setSelectedRide={setSelectedRide}
     />
   );
@@ -647,11 +694,13 @@ function PassengerAppExperience({
   passengerStage,
   paymentMethod,
   ride,
+  routePreview,
   selectedRide,
   setDestination,
   setOrigin,
   setPassengerStage,
   setPaymentMethod,
+  setRoutePreview,
   setSelectedRide,
 }) {
   const rideActive = !['idle', 'completed', 'cancelled'].includes(ride.status);
@@ -714,7 +763,7 @@ function PassengerAppExperience({
       <main className="passenger-dark-page">
         <section className="passenger-screen">
           <div className="passenger-map-large">
-            <RouteMap origin={origin} destination={destination} ride={ride} />
+            <RouteMap origin={origin} destination={destination} ride={ride} onRouteReady={setRoutePreview} />
             <button className="map-back" onClick={() => setPassengerStage('plan')}><ChevronRight size={22} /></button>
             <div className="route-title">{origin.split(',')[0] || 'Origem'} <span>›</span> {destination || 'Destino'}</div>
           </div>
@@ -724,7 +773,7 @@ function PassengerAppExperience({
             <h1>Escolher uma viagem</h1>
             <div className="ride-choice-list">
               {rideOptions.map((rideOption, index) => {
-                const optionEstimate = estimateRouteWithDriver(origin, destination, rideOption, null);
+                const optionEstimate = estimateRouteWithDriver(origin, destination, rideOption, routePreview);
                 return (
                   <button
                     className={selectedRide === index ? 'choice-row selected' : 'choice-row'}
@@ -1076,25 +1125,141 @@ function Quality({ icon: Icon, label, value }) {
 }
 
 function RouteMap({ origin, destination, ride, onRouteReady }) {
+  const mapNodeRef = useRef(null);
+  const mapRef = useRef(null);
+  const directionsRef = useRef(null);
+  const [mapState, setMapState] = useState('loading');
+
   useEffect(() => {
+    let cancelled = false;
     const activeOrigin = ride.originCoords || fallbackCoords(origin || '', 0);
     const activeDestination = ride.destinationCoords || fallbackCoords(destination || '', 1);
+
     onRouteReady?.({ originCoords: activeOrigin, destinationCoords: activeDestination });
+
+    async function drawMap() {
+      if (!mapNodeRef.current) return;
+
+      try {
+        setMapState('loading');
+        const maps = await loadGoogleMaps();
+        if (cancelled || !mapNodeRef.current) return;
+
+        const geocoder = new maps.Geocoder();
+        const geocode = (address, fallback) => new Promise((resolve) => {
+          if (!address?.trim()) {
+            resolve({ lat: fallback[0], lng: fallback[1] });
+            return;
+          }
+
+          geocoder.geocode(
+            {
+              address: `${address}, Brasil`,
+              componentRestrictions: { country: 'BR' },
+            },
+            (results, status) => {
+              if (status === 'OK' && results?.[0]?.geometry?.location) {
+                const location = results[0].geometry.location;
+                resolve({ lat: location.lat(), lng: location.lng() });
+                return;
+              }
+              resolve({ lat: fallback[0], lng: fallback[1] });
+            },
+          );
+        });
+
+        const originLatLng = ride.originCoords
+          ? { lat: ride.originCoords[0], lng: ride.originCoords[1] }
+          : await geocode(origin, activeOrigin);
+        const destinationLatLng = ride.destinationCoords
+          ? { lat: ride.destinationCoords[0], lng: ride.destinationCoords[1] }
+          : await geocode(destination || origin, activeDestination);
+
+        if (cancelled || !mapNodeRef.current) return;
+
+        if (!mapRef.current) {
+          mapRef.current = new maps.Map(mapNodeRef.current, {
+            center: originLatLng,
+            zoom: destination?.trim() ? 13 : 15,
+            disableDefaultUI: true,
+            clickableIcons: false,
+            gestureHandling: 'greedy',
+            styles: [
+              { featureType: 'poi.business', stylers: [{ visibility: 'off' }] },
+              { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+            ],
+          });
+        } else {
+          mapRef.current.setCenter(originLatLng);
+        }
+
+        if (!directionsRef.current) {
+          directionsRef.current = new maps.DirectionsRenderer({
+            map: mapRef.current,
+            suppressMarkers: false,
+            polylineOptions: {
+              strokeColor: '#e5092d',
+              strokeOpacity: 0.95,
+              strokeWeight: 6,
+            },
+          });
+        }
+
+        if (!destination?.trim() && !ride.destinationCoords) {
+          directionsRef.current.set('directions', null);
+          new maps.Marker({ position: originLatLng, map: mapRef.current, title: 'Origem SIGA' });
+          setMapState('ready');
+          return;
+        }
+
+        const directionsService = new maps.DirectionsService();
+        directionsService.route(
+          {
+            origin: originLatLng,
+            destination: destinationLatLng,
+            travelMode: maps.TravelMode.DRIVING,
+          },
+          (result, status) => {
+            if (cancelled) return;
+
+            if (status === 'OK' && result) {
+              directionsRef.current.setDirections(result);
+              const leg = result.routes?.[0]?.legs?.[0];
+              onRouteReady?.({
+                originCoords: [originLatLng.lat, originLatLng.lng],
+                destinationCoords: [destinationLatLng.lat, destinationLatLng.lng],
+                routeDistanceKm: leg?.distance?.value ? leg.distance.value / 1000 : null,
+                routeDurationMin: leg?.duration?.value ? leg.duration.value / 60 : null,
+              });
+              setMapState('ready');
+              return;
+            }
+
+            setMapState('fallback');
+          },
+        );
+      } catch {
+        if (!cancelled) setMapState('fallback');
+      }
+    }
+
+    drawMap();
+
+    return () => {
+      cancelled = true;
+    };
   }, [origin, destination, ride.originCoords, ride.destinationCoords, onRouteReady]);
 
   return (
     <>
       <div className="route-map" aria-label="Mapa do trajeto">
-        <span className="map-street map-street-one" />
-        <span className="map-street map-street-two" />
-        <span className="map-street map-street-three" />
-        <span className="map-street map-street-four" />
-        <svg className="route-drawing" viewBox="0 0 360 220" preserveAspectRatio="none" aria-hidden="true">
-          <path className="route-shadow" d="M62 154 C122 112 168 126 214 84 S286 64 316 38" />
-          <path className="route-path" d="M62 154 C122 112 168 126 214 84 S286 64 316 38" />
-        </svg>
-        <span className="route-dot route-dot-a">A</span>
-        <span className="route-dot route-dot-b">B</span>
+        <div className="google-map-canvas" ref={mapNodeRef} />
+        {mapState === 'loading' && <div className="map-loading">Carregando mapa real...</div>}
+        {mapState === 'fallback' && (
+          <div className="map-loading map-warning">
+            Ative a chave do Google Maps para ver ruas reais e calcular a rota.
+          </div>
+        )}
       </div>
       <div className="map-route-label">
         <span><MapPin size={14} /> {origin || 'Origem'}</span>
