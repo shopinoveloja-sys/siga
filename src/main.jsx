@@ -381,6 +381,20 @@ function App() {
     );
   }
 
+  if (!isPassenger) {
+    return (
+      <DriverMapExperience
+        ride={ride}
+        online={online}
+        setOnline={setOnline}
+        connected={connected}
+        cta={cta}
+        onMainAction={handleMainAction}
+        emitRide={emitRide}
+      />
+    );
+  }
+
   return (
     <main className="page">
       <section className="phone" aria-label="Aplicativo SIGA">
@@ -636,6 +650,90 @@ function DriverView({ online, setOnline, ride, connected, emitRide }) {
         <Quality icon={Heart} label="Favoritos" value="24" />
       </div>
     </>
+  );
+}
+
+function DriverMapExperience({ ride, online, setOnline, connected, cta, onMainAction, emitRide }) {
+  const hasRequest = ride.status !== 'idle';
+  const nextTrip = hasRequest ? `${ride.price || 'R$ 0,00'}` : '+R$ 5,50';
+
+  return (
+    <main className="driver-map-page">
+      <section className="driver-map-screen" aria-label="Mapa do motorista SIGA">
+        <DriverDemandMap ride={ride} />
+
+        <div className="driver-map-top">
+          <button className="driver-floating-button" aria-label="Inicio"><Home size={22} /></button>
+          <div className="driver-earnings-pill">
+            <span>R$</span>
+            <strong>{hasRequest ? ride.price?.replace('R$', '').trim() : '64,33'}</strong>
+          </div>
+          <button className="driver-floating-button" aria-label="Buscar"><Menu size={22} /></button>
+        </div>
+
+        <div className="driver-today-chip">HOJE</div>
+
+        <button className="driver-start-button" onClick={onMainAction}>{cta}</button>
+
+        <div className="driver-map-side-actions">
+          <button><ShieldCheck size={22} /></button>
+          <button><Gauge size={22} /></button>
+        </div>
+
+        <div className="driver-map-bottom">
+          <button className="driver-bar-icon" aria-label="Filtros"><Menu size={22} /></button>
+          <div>
+            <strong>{hasRequest ? `${rideLabels[ride.status]}: ${nextTrip}` : `Proxima viagem: ${nextTrip}`}</strong>
+            <small>{connected ? (online ? 'Voce esta online' : 'Voce esta offline') : 'Conectando simulacao'}</small>
+          </div>
+          <button className="driver-bar-icon" onClick={() => setOnline(!online)} aria-label="Alternar status">
+            <RadioTower size={22} />
+          </button>
+        </div>
+
+        {hasRequest && (
+          <div className="driver-request-sheet">
+            <RideStatusCard ride={ride} emitRide={emitRide} role="driver" />
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function DriverDemandMap({ ride }) {
+  return (
+    <div className="driver-demand-map">
+      <span className="demand-water demand-water-one" />
+      <span className="demand-water demand-water-two" />
+      <span className="demand-park demand-park-one" />
+      <span className="demand-park demand-park-two" />
+      <span className="demand-road demand-road-one" />
+      <span className="demand-road demand-road-two" />
+      <span className="demand-road demand-road-three" />
+      <span className="heat heat-one" />
+      <span className="heat heat-two" />
+      <span className="heat heat-three" />
+      <span className="heat heat-four" />
+      <span className="bonus bonus-one">+R$ 14,75</span>
+      <span className="bonus bonus-two">+R$ 7,75</span>
+      <span className="bonus bonus-three">+R$ 9,50</span>
+      <span className="bonus bonus-four">+R$ 20</span>
+      <span className="bonus bonus-five">+R$ 2</span>
+      <span className="driver-position"><Navigation2 size={28} /></span>
+      {ride.status !== 'idle' && (
+        <>
+          <svg className="driver-trip-route" viewBox="0 0 360 680" preserveAspectRatio="none">
+            <path d="M180 330 C210 282 235 240 260 192 S304 104 316 58" />
+          </svg>
+          <span className="pickup-pin">A</span>
+          <span className="dropoff-pin">B</span>
+        </>
+      )}
+      <span className="map-place place-one">Aeroporto</span>
+      <span className="map-place place-two">Centro</span>
+      <span className="map-place place-three">Campo</span>
+    </div>
   );
 }
 
