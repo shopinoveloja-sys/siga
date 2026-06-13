@@ -445,10 +445,46 @@ button {
 .destination-card,
 .safety-card,
 .driver-status,
-.trip-card {
+.trip-card,
+.realtime-banner,
+.ride-status-card {
   border: 1px solid rgba(227, 19, 44, 0.16);
   background: #fffafb;
   border-radius: 22px;
+}
+
+.realtime-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+  margin-bottom: 12px;
+}
+
+.realtime-banner > span {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #d2b6bd;
+}
+
+.realtime-banner.online > span {
+  background: var(--green);
+  box-shadow: 0 0 0 7px rgba(18, 164, 111, 0.12);
+}
+
+.realtime-banner strong,
+.realtime-banner small {
+  display: block;
+}
+
+.realtime-banner strong {
+  font-size: 13px;
+}
+
+.realtime-banner small {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .destination-card {
@@ -538,6 +574,99 @@ button {
   color: var(--red-dark);
 }
 
+.ride-status-card {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.ride-status-header {
+  display: grid;
+  grid-template-columns: 42px 1fr auto;
+  align-items: center;
+  gap: 11px;
+}
+
+.ride-status-header > span {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 15px;
+  color: white;
+  background: linear-gradient(135deg, var(--red), var(--red-dark));
+}
+
+.ride-status-header strong,
+.ride-status-header small,
+.driver-mini-card strong,
+.driver-mini-card small {
+  display: block;
+}
+
+.ride-status-header small,
+.driver-mini-card small {
+  color: var(--muted);
+}
+
+.ride-status-header b {
+  color: var(--red-dark);
+}
+
+.timeline {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.timeline-step {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  color: #b49ca3;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.timeline-step > span {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: #f3e4e7;
+}
+
+.timeline-step.active {
+  color: var(--red-dark);
+}
+
+.timeline-step.active > span {
+  color: white;
+  background: var(--red);
+}
+
+.driver-mini-card {
+  padding: 12px;
+  border-radius: 18px;
+  background: var(--red-soft);
+}
+
+.ride-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.ride-actions button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 15px;
+  color: white;
+  background: var(--red-dark);
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .safety-card {
   display: flex;
   gap: 12px;
@@ -619,6 +748,23 @@ button {
   display: grid;
   gap: 15px;
   padding: 15px;
+}
+
+.empty-trip {
+  justify-items: start;
+}
+
+.empty-trip svg {
+  color: var(--red);
+}
+
+.empty-trip strong,
+.empty-trip small {
+  display: block;
+}
+
+.empty-trip small {
+  color: var(--muted);
 }
 
 .trip-route {

@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { io } from 'socket.io-client';
 import {
   Bell,
   CarFront,
@@ -42,18 +43,94 @@ const driverStats = [
   { label: 'Zona quente', value: '2.4x', icon: RadioTower },
 ];
 
+const rideLabels = {
+  idle: 'Sem pedido ativo',
+  requested: 'Pedido enviado',
+  accepted: 'Motorista aceitou',
+  arrived: 'Motorista chegou',
+  started: 'Corrida em andamento',
+  completed: 'Corrida finalizada',
+  cancelled: 'Corrida cancelada',
+};
+
+const initialRide = {
+  status: 'idle',
+  category: null,
+  price: null,
+  origin: 'Av. Paulista, 1578',
+  destination: 'Congonhas',
+  driver: null,
+  vehicle: null,
+};
+
 function App() {
   const [entered, setEntered] = useState(false);
   const [mode, setMode] = useState('passenger');
   const [selectedRide, setSelectedRide] = useState(1);
   const [online, setOnline] = useState(true);
+  const [socket, setSocket] = useState(null);
+  const [connected, setConnected] = useState(false);
+  const [ride, setRide] = useState(initialRide);
   const activeRide = rideOptions[selectedRide];
   const isPassenger = mode === 'passenger';
 
   const cta = useMemo(() => {
-    if (isPassenger) return `Chamar ${activeRide.name}`;
+    if (isPassenger) {
+      if (ride.status === 'idle' || ride.status === 'cancelled' || ride.status === 'completed') return `Chamar ${activeRide.name}`;
+      if (ride.status === 'requested') return 'Aguardando motorista';
+      if (ride.status === 'accepted') return 'Confirmar embarque';
+      if (ride.status === 'arrived') return 'Motorista chegou';
+      if (ride.status === 'started') return 'Em viagem';
+    }
+    if (ride.status === 'requested') return 'Aceitar corrida';
+    if (ride.status === 'accepted') return 'Cheguei ao local';
+    if (ride.status === 'arrived') return 'Iniciar corrida';
+    if (ride.status === 'started') return 'Finalizar corrida';
+    if (ride.status === 'completed' || ride.status === 'cancelled') return 'Limpar simulação';
     return online ? 'Receber corridas' : 'Ficar online';
-  }, [activeRide, isPassenger, online]);
+  }, [activeRide, isPassenger, online, ride.status]);
+
+  useEffect(() => {
+    const client = io();
+    setSocket(client);
+    client.on('connect', () => setConnected(true));
+    client.on('disconnect', () => setConnected(false));
+    client.on('ride:update', setRide);
+
+    return () => {
+      client.disconnect();
+    };
+  }, []);
+
+  function handleMainAction() {
+    if (!socket) return;
+
+    if (isPassenger) {
+      if (ride.status === 'idle' || ride.status === 'cancelled' || ride.status === 'completed') {
+        socket.emit('ride:request', {
+          category: activeRide.name,
+          price: activeRide.price,
+        });
+      }
+      return;
+    }
+
+    if (!online) {
+      setOnline(true);
+      return;
+    }
+
+    const eventByStatus = {
+      requested: 'ride:accept',
+      accepted: 'ride:arrive',
+      arrived: 'ride:start',
+      started: 'ride:finish',
+      completed: 'ride:reset',
+      cancelled: 'ride:reset',
+    };
+    const event = eventByStatus[ride.status];
+    if (event) socket.emit(event);
+  }
 
   if (!entered) {
     return (
@@ -143,9 +220,12 @@ function App() {
               activeRide={activeRide}
               selectedRide={selectedRide}
               setSelectedRide={setSelectedRide}
+              ride={ride}
+              connected={connected}
+              socket={socket}
             />
           ) : (
-            <DriverView online={online} setOnline={setOnline} />
+            <DriverView online={online} setOnline={setOnline} ride={ride} connected={connected} socket={socket} />
           )}
         </section>
 
@@ -167,7 +247,7 @@ function App() {
           )}
         </footer>
 
-        <button className="main-cta">
+        <button className="main-cta" onClick={handleMainAction}>
           {cta}
           <ChevronRight size={20} />
         </button>
@@ -176,10 +256,13 @@ function App() {
   );
 }
 
-function PassengerView({ activeRide, selectedRide, setSelectedRide }) {
+function PassengerView({ activeRide, selectedRide, setSelectedRide, ride, connected, socket }) {
+  const hasActiveRide = !['idle', 'completed', 'cancelled'].includes(ride.status);
+
   return (
     <>
       <div className="sheet-handle" />
+      <RealtimeBanner connected={connected} ride={ride} />
       <div className="destination-card">
         <div className="point-line">
           {passengerSteps.map((step) => (
@@ -195,26 +278,30 @@ function PassengerView({ activeRide, selectedRide, setSelectedRide }) {
       </div>
 
       <div className="section-title">
-        <h1>Escolha sua corrida</h1>
-        <span>{activeRide.time}</span>
+        <h1>{hasActiveRide ? rideLabels[ride.status] : 'Escolha sua corrida'}</h1>
+        <span>{hasActiveRide ? ride.price : activeRide.time}</span>
       </div>
 
-      <div className="ride-list">
-        {rideOptions.map((ride, index) => (
-          <button
-            className={selectedRide === index ? 'ride-row selected' : 'ride-row'}
-            key={ride.name}
-            onClick={() => setSelectedRide(index)}
-          >
-            <span className="ride-avatar"><CarFront size={21} /></span>
-            <div>
-              <strong>{ride.name}</strong>
-              <small>{ride.time} de espera - {ride.note}</small>
-            </div>
-            <b>{ride.price}</b>
-          </button>
-        ))}
-      </div>
+      {hasActiveRide ? (
+        <RideStatusCard ride={ride} socket={socket} role="passenger" />
+      ) : (
+        <div className="ride-list">
+          {rideOptions.map((rideOption, index) => (
+            <button
+              className={selectedRide === index ? 'ride-row selected' : 'ride-row'}
+              key={rideOption.name}
+              onClick={() => setSelectedRide(index)}
+            >
+              <span className="ride-avatar"><CarFront size={21} /></span>
+              <div>
+                <strong>{rideOption.name}</strong>
+                <small>{rideOption.time} de espera - {rideOption.note}</small>
+              </div>
+              <b>{rideOption.price}</b>
+            </button>
+          ))}
+        </div>
+      )}
 
       <article className="safety-card">
         <ShieldCheck size={22} />
@@ -227,10 +314,13 @@ function PassengerView({ activeRide, selectedRide, setSelectedRide }) {
   );
 }
 
-function DriverView({ online, setOnline }) {
+function DriverView({ online, setOnline, ride, connected, socket }) {
+  const hasRequest = ride.status !== 'idle';
+
   return (
     <>
       <div className="sheet-handle" />
+      <RealtimeBanner connected={connected} ride={ride} />
       <div className="driver-status">
         <div>
           <small>Status do motorista</small>
@@ -250,26 +340,19 @@ function DriverView({ online, setOnline }) {
       </div>
 
       <div className="section-title">
-        <h1>Chamada sugerida</h1>
-        <span>R$ 42,60</span>
+        <h1>{hasRequest ? rideLabels[ride.status] : 'Aguardando pedido'}</h1>
+        <span>{hasRequest ? ride.price : 'Online'}</span>
       </div>
 
-      <article className="trip-card">
-        <div className="trip-route">
-          <span />
-          <div>
-            <strong>Pinheiros</strong>
-            <small>Embarque em 4 min</small>
-          </div>
-        </div>
-        <div className="trip-route">
-          <span />
-          <div>
-            <strong>Vila Olimpia</strong>
-            <small>8,2 km - 18 min</small>
-          </div>
-        </div>
-      </article>
+      {hasRequest ? (
+        <RideStatusCard ride={ride} socket={socket} role="driver" />
+      ) : (
+        <article className="trip-card empty-trip">
+          <RadioTower size={26} />
+          <strong>Abra esta tela em outro celular como passageiro e toque em chamar corrida.</strong>
+          <small>A chamada aparece aqui automaticamente para aceitar.</small>
+        </article>
+      )}
 
       <div className="quality-list">
         <Quality icon={Star} label="Nota" value="4.98" />
@@ -278,6 +361,62 @@ function DriverView({ online, setOnline }) {
         <Quality icon={Heart} label="Favoritos" value="24" />
       </div>
     </>
+  );
+}
+
+function RealtimeBanner({ connected, ride }) {
+  return (
+    <div className={connected ? 'realtime-banner online' : 'realtime-banner'}>
+      <span />
+      <div>
+        <strong>{connected ? 'Simulacao em tempo real' : 'Conectando simulacao'}</strong>
+        <small>{rideLabels[ride.status]}</small>
+      </div>
+    </div>
+  );
+}
+
+function RideStatusCard({ ride, socket, role }) {
+  const canPassengerCancel = role === 'passenger' && ['requested', 'accepted', 'arrived'].includes(ride.status);
+  const canReset = ['completed', 'cancelled'].includes(ride.status);
+
+  return (
+    <article className="ride-status-card">
+      <div className="ride-status-header">
+        <span><CarFront size={20} /></span>
+        <div>
+          <strong>{ride.category || 'SIGA Comfort'}</strong>
+          <small>{ride.id || 'Pedido em preparacao'}</small>
+        </div>
+        <b>{ride.price || 'R$ 31,40'}</b>
+      </div>
+
+      <div className="timeline">
+        <Step active done label="Pedido" />
+        <Step active={['accepted', 'arrived', 'started', 'completed'].includes(ride.status)} done={['accepted', 'arrived', 'started', 'completed'].includes(ride.status)} label="Aceite" />
+        <Step active={['arrived', 'started', 'completed'].includes(ride.status)} done={['arrived', 'started', 'completed'].includes(ride.status)} label="Chegada" />
+        <Step active={['started', 'completed'].includes(ride.status)} done={['started', 'completed'].includes(ride.status)} label="Viagem" />
+      </div>
+
+      <div className="driver-mini-card">
+        <strong>{ride.driver || 'Aguardando motorista'}</strong>
+        <small>{ride.vehicle || 'A chamada ja esta visivel para o motorista.'}</small>
+      </div>
+
+      <div className="ride-actions">
+        {canPassengerCancel && <button onClick={() => socket?.emit('ride:cancel')}>Cancelar pedido</button>}
+        {canReset && <button onClick={() => socket?.emit('ride:reset')}>Nova simulacao</button>}
+      </div>
+    </article>
+  );
+}
+
+function Step({ active, done, label }) {
+  return (
+    <div className={active ? 'timeline-step active' : 'timeline-step'}>
+      <span>{done ? <CheckCircle2 size={15} /> : null}</span>
+      <small>{label}</small>
+    </div>
   );
 }
 
