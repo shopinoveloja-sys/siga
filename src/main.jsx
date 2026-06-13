@@ -43,6 +43,7 @@ const driverStats = [
 ];
 
 function App() {
+  const [entered, setEntered] = useState(false);
   const [mode, setMode] = useState('passenger');
   const [selectedRide, setSelectedRide] = useState(1);
   const [online, setOnline] = useState(true);
@@ -53,6 +54,46 @@ function App() {
     if (isPassenger) return `Chamar ${activeRide.name}`;
     return online ? 'Receber corridas' : 'Ficar online';
   }, [activeRide, isPassenger, online]);
+
+  if (!entered) {
+    return (
+      <main className="splash-page">
+        <section className="splash-screen" aria-label="Entrada SIGA">
+          <div className="splash-map">
+            <span className="splash-street splash-street-a" />
+            <span className="splash-street splash-street-b" />
+            <span className="splash-street splash-street-c" />
+            <span className="splash-route" />
+          </div>
+          <div className="splash-content">
+            <p className="splash-kicker">Mobilidade urbana</p>
+            <h1 className="siga-logo">SIGA</h1>
+            <p className="splash-subtitle">Entre na sua jornada</p>
+          </div>
+          <div className="entry-actions" aria-label="Entrar no aplicativo">
+            <button
+              onClick={() => {
+                setMode('passenger');
+                setEntered(true);
+              }}
+            >
+              <UserRound size={20} />
+              Passageiro
+            </button>
+            <button
+              onClick={() => {
+                setMode('driver');
+                setEntered(true);
+              }}
+            >
+              <CarFront size={20} />
+              Motorista
+            </button>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="page">
