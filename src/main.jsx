@@ -209,6 +209,7 @@ function estimateRouteWithDriver(origin, destination, ride, routePreview) {
 function App() {
   const [entered, setEntered] = useState(false);
   const [mode, setMode] = useState('passenger');
+  const [passengerStage, setPassengerStage] = useState('home');
   const [selectedRide, setSelectedRide] = useState(1);
   const [online, setOnline] = useState(true);
   const [origin, setOrigin] = useState('Av. Paulista, 1578');
@@ -396,6 +397,29 @@ function App() {
   }
 
   return (
+    <PassengerAppExperience
+      activeRide={activeRide}
+      canRequestRide={canRequestRide}
+      connected={connected}
+      destination={destination}
+      emitRide={emitRide}
+      estimate={estimate}
+      onMainAction={handleMainAction}
+      origin={origin}
+      passengerStage={passengerStage}
+      paymentMethod={paymentMethod}
+      ride={ride}
+      selectedRide={selectedRide}
+      setDestination={setDestination}
+      setOrigin={setOrigin}
+      setPassengerStage={setPassengerStage}
+      setPaymentMethod={setPaymentMethod}
+      setSelectedRide={setSelectedRide}
+    />
+  );
+
+  /*
+  return (
     <main className="page">
       <section className="phone" aria-label="Aplicativo SIGA">
         <header className="app-topbar">
@@ -481,6 +505,7 @@ function App() {
       </section>
     </main>
   );
+  */
 }
 
 function PassengerView({
@@ -600,6 +625,226 @@ function PassengerView({
         </div>
       </article>
     </>
+  );
+}
+
+const recentDestinations = [
+  { name: 'Imperio dos Moveis', address: 'Avenida Desembargador Mario da Silva Nunes', km: '7.6 km' },
+  { name: 'Rua Professora Elza Lemos Andreatta', address: 'Morada de Camburi, Vitoria - ES', km: '780 m' },
+  { name: 'Shopping Mestre Alvaro', address: 'Av. Joao Palacio, 300 - Eurico Salles', km: '4.3 km' },
+  { name: 'Aeroporto de Congonhas', address: 'Av. Washington Luis, Sao Paulo', km: '8.1 km' },
+  { name: 'Academia Triton', address: 'Rua Arquimedes Thevenard, Jardim Camburi', km: '4.2 km' },
+];
+
+function PassengerAppExperience({
+  activeRide,
+  canRequestRide,
+  connected,
+  destination,
+  estimate,
+  onMainAction,
+  origin,
+  passengerStage,
+  paymentMethod,
+  ride,
+  selectedRide,
+  setDestination,
+  setOrigin,
+  setPassengerStage,
+  setPaymentMethod,
+  setSelectedRide,
+}) {
+  const rideActive = !['idle', 'completed', 'cancelled'].includes(ride.status);
+  const stage = rideActive ? 'requested' : passengerStage;
+
+  if (stage === 'plan') {
+    return (
+      <main className="passenger-dark-page">
+        <section className="passenger-screen">
+          <header className="passenger-plan-header">
+            <button onClick={() => setPassengerStage('home')}><ChevronRight size={21} /></button>
+            <h1>Planeje sua proxima viagem</h1>
+          </header>
+
+          <div className="plan-chips">
+            <span><Clock3 size={15} /> Ir agora</span>
+            <span><UserRound size={15} /> Para mim</span>
+          </div>
+
+          <div className="plan-card">
+            <label>
+              <span>Origem</span>
+              <input value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="Casa" />
+            </label>
+            <label>
+              <span>Destino</span>
+              <input value={destination} onChange={(event) => setDestination(event.target.value)} placeholder="Para onde?" />
+            </label>
+          </div>
+
+          <div className="recent-list">
+            {recentDestinations.map((item) => (
+              <button
+                key={item.name}
+                onClick={() => {
+                  setDestination(item.name);
+                  setPassengerStage('choose');
+                }}
+              >
+                <Clock3 size={17} />
+                <small>{item.km}</small>
+                <div>
+                  <strong>{item.name}</strong>
+                  <span>{item.address}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <button className="continue-plan" onClick={() => setPassengerStage('choose')} disabled={!destination.trim()}>
+            Continuar
+          </button>
+        </section>
+      </main>
+    );
+  }
+
+  if (stage === 'choose') {
+    return (
+      <main className="passenger-dark-page">
+        <section className="passenger-screen">
+          <div className="passenger-map-large">
+            <RouteMap origin={origin} destination={destination} ride={ride} />
+            <button className="map-back" onClick={() => setPassengerStage('plan')}><ChevronRight size={22} /></button>
+            <div className="route-title">{origin.split(',')[0] || 'Origem'} <span>›</span> {destination || 'Destino'}</div>
+          </div>
+
+          <section className="ride-choice-sheet">
+            <div className="sheet-handle" />
+            <h1>Escolher uma viagem</h1>
+            <div className="ride-choice-list">
+              {rideOptions.map((rideOption, index) => {
+                const optionEstimate = estimateRouteWithDriver(origin, destination, rideOption, null);
+                return (
+                  <button
+                    className={selectedRide === index ? 'choice-row selected' : 'choice-row'}
+                    onClick={() => setSelectedRide(index)}
+                    key={rideOption.name}
+                  >
+                    <span><CarFront size={26} /></span>
+                    <div>
+                      <strong>{rideOption.name}</strong>
+                      <small>{rideOption.time} espera · {optionEstimate.durationMin || '--'} min</small>
+                    </div>
+                    <b>{optionEstimate.price}</b>
+                  </button>
+                );
+              })}
+            </div>
+
+            <label className="payment-row">
+              <WalletCards size={22} />
+              <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
+                <option value="">Pagamento</option>
+                {paymentOptions.map((option) => <option value={option} key={option}>{option}</option>)}
+              </select>
+            </label>
+
+            {estimate.isReady && (
+              estimate.hasDriver ? (
+                <div className="passenger-price-rule">
+                  {estimate.distanceKm} km percurso + {estimate.pickupDistanceKm} km motorista = {estimate.billableKm} km cobrados
+                </div>
+              ) : (
+                <div className="passenger-unavailable">Nenhum motorista disponivel em ate 5 km da origem.</div>
+              )
+            )}
+
+            <button className="choose-ride-button" onClick={onMainAction} disabled={!canRequestRide}>
+              {canRequestRide ? `Escolher ${activeRide.name}` : 'Complete a viagem'}
+            </button>
+          </section>
+        </section>
+      </main>
+    );
+  }
+
+  if (stage === 'requested') {
+    return (
+      <main className="passenger-dark-page">
+        <section className="passenger-screen">
+          <div className="requested-map">
+            <RouteMap origin={ride.origin} destination={ride.destination} ride={ride} />
+            <button className="map-back"><ChevronRight size={22} /></button>
+          </div>
+          <section className="requested-sheet">
+            <div className="sheet-handle" />
+            <h1>{rideLabels[ride.status]}</h1>
+            <p>{ride.status === 'requested' ? 'Procurando um motorista parceiro perto de voce' : 'Acompanhe sua viagem em tempo real'}</p>
+            <div className="request-progress" />
+            <RideStatusCard ride={ride} emitRide={emitRide} role="passenger" />
+          </section>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="passenger-dark-page">
+      <section className="passenger-screen home-screen">
+        <div className="passenger-tabs">
+          <strong>🚘 SIGA</strong>
+          <span>🛍 Envios</span>
+        </div>
+
+        <button className="where-card" onClick={() => setPassengerStage('plan')}>
+          <MapPin size={22} />
+          <span>Para onde?</span>
+          <b>Mais tarde</b>
+        </button>
+
+        <button className="saved-place" onClick={() => {
+          setDestination('Imperio dos Moveis');
+          setPassengerStage('choose');
+        }}>
+          <Clock3 size={19} />
+          <div>
+            <strong>Imperio dos Moveis</strong>
+            <span>Avenida Desembargador Mario ...</span>
+          </div>
+          <ChevronRight size={18} />
+        </button>
+
+        <h2>Para voce</h2>
+        <div className="service-row">
+          <button><CarFront size={30} /><span>Viagem</span></button>
+          <button><Navigation2 size={30} /><span>Moto</span></button>
+          <button><WalletCards size={30} /><span>Entrega</span></button>
+          <button><Clock3 size={30} /><span>Reserve</span></button>
+        </div>
+
+        <h2>Economize todos os dias</h2>
+        <div className="promo-row">
+          <article>
+            <div className="promo-map-art"><span /><b /></div>
+            <strong>Adicione ate 5 paradas</strong>
+            <small>Aproveite para retirar algo no caminho</small>
+          </article>
+          <article>
+            <div className="promo-red-art" />
+            <strong>Viagens com SIGA</strong>
+            <small>Tarifa calculada com motorista no raio</small>
+          </article>
+        </div>
+
+        <footer className="passenger-bottom-nav">
+          <button className="active"><Home size={19} />Inicio</button>
+          <button><Menu size={19} />Opcoes</button>
+          <button><CreditCard size={19} />Atividade</button>
+          <button><UserRound size={19} />Conta</button>
+        </footer>
+      </section>
+    </main>
   );
 }
 
