@@ -288,6 +288,8 @@ button {
 
 .map-card {
   position: relative;
+  z-index: 0;
+  isolation: isolate;
   height: 260px;
   margin: 0 18px;
   overflow: hidden;
@@ -296,65 +298,67 @@ button {
   box-shadow: 0 18px 46px rgba(127, 21, 35, 0.15);
 }
 
-.map-grid {
+.route-map {
   position: absolute;
   inset: 0;
-  background:
-    linear-gradient(90deg, rgba(159, 6, 24, 0.08) 1px, transparent 1px),
-    linear-gradient(rgba(159, 6, 24, 0.08) 1px, transparent 1px);
-  background-size: 54px 54px;
+  z-index: 0;
+  overflow: hidden;
 }
 
-.street,
-.route {
+.route-map .leaflet-tile-pane {
+  filter: saturate(0.88) contrast(1.02);
+}
+
+.route-map .leaflet-container,
+.route-map {
+  background: #ffe3e8;
+}
+
+.route-marker {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 12px;
+  color: white;
+  background: var(--red);
+  border: 3px solid white;
+  box-shadow: 0 10px 26px rgba(92, 0, 13, 0.32);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.destination-marker {
+  background: var(--ink);
+}
+
+.map-route-label {
   position: absolute;
-  border-radius: 999px;
+  left: 12px;
+  right: 12px;
+  top: 12px;
+  z-index: 2;
+  display: grid;
+  gap: 7px;
+  pointer-events: none;
 }
 
-.street {
-  height: 18px;
-  background: rgba(25, 17, 20, 0.08);
-}
-
-.street-a {
-  width: 82%;
-  left: -7%;
-  top: 43%;
-  transform: rotate(-22deg);
-}
-
-.street-b {
-  width: 70%;
-  left: 34%;
-  top: 28%;
-  transform: rotate(40deg);
-}
-
-.street-c {
-  width: 62%;
-  left: 5%;
-  bottom: 16%;
-  transform: rotate(13deg);
-}
-
-.route {
-  height: 8px;
-  background: linear-gradient(90deg, var(--red-dark), var(--red), #ff7d8e);
-  box-shadow: 0 0 18px rgba(227, 19, 44, 0.55);
-}
-
-.route-a {
-  width: 48%;
-  left: 18%;
-  top: 53%;
-  transform: rotate(-22deg);
-}
-
-.route-b {
-  width: 27%;
-  left: 55%;
-  top: 39%;
-  transform: rotate(40deg);
+.map-route-label span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--red-dark);
+  box-shadow: 0 10px 26px rgba(92, 0, 13, 0.12);
+  font-size: 12px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .map-pin {
@@ -426,6 +430,7 @@ button {
 
 .sheet {
   position: relative;
+  z-index: 2;
   margin-top: -22px;
   padding: 18px 18px 118px;
   min-height: 430px;
@@ -616,7 +621,7 @@ button {
 
 .fare-summary {
   display: grid;
-  grid-template-columns: auto auto 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
   align-items: center;
   margin-top: 12px;
@@ -635,8 +640,37 @@ button {
 }
 
 .fare-summary strong {
-  justify-self: end;
-  text-align: right;
+  grid-column: 1 / -1;
+  justify-self: start;
+  text-align: left;
+}
+
+.availability-warning {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 18px;
+  background: #fff1f3;
+  border: 1px solid rgba(227, 19, 44, 0.24);
+  color: var(--red-dark);
+}
+
+.availability-warning svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.availability-warning strong,
+.availability-warning small {
+  display: block;
+}
+
+.availability-warning small {
+  margin-top: 3px;
+  color: var(--muted);
+  line-height: 1.35;
 }
 
 .ride-status-card {

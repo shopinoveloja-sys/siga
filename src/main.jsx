@@ -1,6 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { io } from 'socket.io-client';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import {
   Bell,
   CarFront,
@@ -26,9 +28,9 @@ import {
 import './styles.css';
 
 const rideOptions = [
-  { name: 'SIGA Pop', time: '4 min', multiplier: 1, note: 'economico' },
-  { name: 'SIGA Comfort', time: '2 min', multiplier: 1.28, note: 'recomendado' },
-  { name: 'SIGA Black', time: '6 min', multiplier: 1.85, note: 'premium' },
+  { name: 'SIGA Pop', time: '4 min', ratePerKm: 2.4, note: 'economico' },
+  { name: 'SIGA Comfort', time: '2 min', ratePerKm: 3.1, note: 'recomendado' },
+  { name: 'SIGA Black', time: '6 min', ratePerKm: 4.6, note: 'premium' },
 ];
 
 const paymentOptions = ['Pix', 'Cartao de credito', 'Carteira SIGA', 'Dinheiro'];
@@ -58,9 +60,81 @@ const initialRide = {
   paymentMethod: null,
   distanceKm: null,
   durationMin: null,
+  pickupDistanceKm: null,
+  billableKm: null,
+  ratePerKm: null,
+  originCoords: null,
+  destinationCoords: null,
   driver: null,
   vehicle: null,
 };
+
+const fallbackLocations = [
+  { key: 'paulista', coords: [-23.5614, -46.6559] },
+  { key: 'augusta', coords: [-23.5539, -46.6538] },
+  { key: 'congonhas', coords: [-23.6261, -46.6566] },
+  { key: 'morumbi', coords: [-23.6229, -46.6997] },
+  { key: 'pinheiros', coords: [-23.5674, -46.7019] },
+  { key: 'vila olimpia', coords: [-23.5953, -46.6858] },
+  { key: 'itaim', coords: [-23.5849, -46.6778] },
+  { key: 'centro', coords: [-23.5505, -46.6333] },
+];
+
+const simulatedDrivers = [
+  { id: 'M1', name: 'Marina Prado', coords: [-23.5728, -46.6657] },
+  { id: 'M2', name: 'Lucas Santos', coords: [-23.5922, -46.6904] },
+  { id: 'M3', name: 'Rafa Almeida', coords: [-23.5342, -46.6428] },
+  { id: 'M4', name: 'Ana Costa', coords: [-23.615, -46.6518] },
+];
+
+function distanceBetweenKm(a, b) {
+  if (!a || !b) return 0;
+  const toRad = (value) => (value * Math.PI) / 180;
+  const earthRadius = 6371;
+  const dLat = toRad(b[0] - a[0]);
+  const dLon = toRad(b[1] - a[1]);
+  const lat1 = toRad(a[0]);
+  const lat2 = toRad(b[0]);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * earthRadius * Math.asin(Math.sqrt(h));
+}
+
+function findFarthestDriverWithinRadius(originCoords, radiusKm = 5) {
+  const candidates = simulatedDrivers
+    .map((driver) => ({ ...driver, distanceKm: distanceBetweenKm(originCoords, driver.coords) }))
+    .filter((driver) => driver.distanceKm <= radiusKm)
+    .sort((a, b) => b.distanceKm - a.distanceKm);
+  return candidates[0] || null;
+}
+
+function fallbackCoords(address, offset = 0) {
+  const normalized = address.toLowerCase();
+  const found = fallbackLocations.find((item) => normalized.includes(item.key));
+  if (found) return found.coords;
+  return [-23.5614 + offset * 0.035, -46.6559 - offset * 0.04];
+}
+
+async function geocodeAddress(address, offset) {
+  const query = address.trim();
+  if (!query) return null;
+
+  try {
+    const url = new URL('https://nominatim.openstreetmap.org/search');
+    url.searchParams.set('format', 'json');
+    url.searchParams.set('limit', '1');
+    url.searchParams.set('countrycodes', 'br');
+    url.searchParams.set('q', `${query}, Sao Paulo, Brasil`);
+    const response = await fetch(url, { headers: { Accept: 'application/json' } });
+    const [result] = await response.json();
+    if (result?.lat && result?.lon) return [Number(result.lat), Number(result.lon)];
+  } catch {
+    // Fallback keeps the route visible if geocoding is unavailable.
+  }
+
+  return fallbackCoords(query, offset);
+}
 
 function estimateRoute(origin, destination, ride) {
   const cleanOrigin = origin.trim();
@@ -70,6 +144,9 @@ function estimateRoute(origin, destination, ride) {
       isReady: false,
       distanceKm: 0,
       durationMin: 0,
+      pickupDistanceKm: 0,
+      billableKm: 0,
+      ratePerKm: ride.ratePerKm,
       priceNumber: 0,
       price: 'R$ 0,00',
     };
@@ -77,11 +154,54 @@ function estimateRoute(origin, destination, ride) {
 
   const seed = `${cleanOrigin}|${cleanDestination}`.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
   const distanceKm = Math.max(2.4, Math.min(32, 3.2 + (seed % 220) / 10));
-  const durationMin = Math.round(distanceKm * 2.4 + 6);
-  const priceNumber = 6.5 + distanceKm * 2.35 * ride.multiplier + durationMin * 0.34;
+  const pickupDistanceKm = Math.min(5, Math.max(1.2, 2.6 + (seed % 25) / 10));
+  const billableKm = distanceKm + pickupDistanceKm;
+  const durationMin = Math.round(distanceKm * 2.4 + pickupDistanceKm * 2.1 + 6);
+  const priceNumber = billableKm * ride.ratePerKm;
   return {
     isReady: true,
     distanceKm: distanceKm.toFixed(1),
+    pickupDistanceKm: pickupDistanceKm.toFixed(1),
+    billableKm: billableKm.toFixed(1),
+    ratePerKm: ride.ratePerKm,
+    durationMin,
+    priceNumber,
+    price: priceNumber.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+  };
+}
+
+function estimateRouteWithDriver(origin, destination, ride, routePreview) {
+  const base = estimateRoute(origin, destination, ride);
+  const originCoords = routePreview?.originCoords || fallbackCoords(origin, 0);
+  const selectedDriver = base.isReady ? findFarthestDriverWithinRadius(originCoords, 5) : null;
+
+  if (!base.isReady) {
+    return { ...base, hasDriver: false, driver: null, price: 'Informe rota' };
+  }
+
+  if (!selectedDriver) {
+    return {
+      ...base,
+      hasDriver: false,
+      driver: null,
+      pickupDistanceKm: 0,
+      billableKm: Number(base.distanceKm).toFixed(1),
+      priceNumber: 0,
+      price: 'Indisponivel',
+    };
+  }
+
+  const pickupDistanceKm = selectedDriver.distanceKm;
+  const billableKm = Number(base.distanceKm) + pickupDistanceKm;
+  const durationMin = Math.round(Number(base.distanceKm) * 2.4 + pickupDistanceKm * 2.1 + 6);
+  const priceNumber = billableKm * ride.ratePerKm;
+
+  return {
+    ...base,
+    hasDriver: true,
+    driver: selectedDriver,
+    pickupDistanceKm: pickupDistanceKm.toFixed(1),
+    billableKm: billableKm.toFixed(1),
     durationMin,
     priceNumber,
     price: priceNumber.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
@@ -96,13 +216,17 @@ function App() {
   const [origin, setOrigin] = useState('Av. Paulista, 1578');
   const [destination, setDestination] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
+  const [routePreview, setRoutePreview] = useState(null);
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
   const [ride, setRide] = useState(initialRide);
   const activeRide = rideOptions[selectedRide];
   const isPassenger = mode === 'passenger';
-  const estimate = useMemo(() => estimateRoute(origin, destination, activeRide), [origin, destination, activeRide]);
-  const canRequestRide = estimate.isReady && paymentMethod;
+  const estimate = useMemo(
+    () => estimateRouteWithDriver(origin, destination, activeRide, routePreview),
+    [origin, destination, activeRide, routePreview],
+  );
+  const canRequestRide = estimate.isReady && estimate.hasDriver && paymentMethod;
 
   const cta = useMemo(() => {
     if (isPassenger) {
@@ -190,6 +314,13 @@ function App() {
           paymentMethod,
           distanceKm: estimate.distanceKm,
           durationMin: String(estimate.durationMin),
+          pickupDistanceKm: estimate.pickupDistanceKm,
+          billableKm: estimate.billableKm,
+          ratePerKm: String(estimate.ratePerKm),
+          assignedDriverName: estimate.driver?.name,
+          assignedDriverDistanceKm: estimate.pickupDistanceKm,
+          originCoords: routePreview?.originCoords || fallbackCoords(origin, 0),
+          destinationCoords: routePreview?.destinationCoords || fallbackCoords(destination, 1),
         });
       }
       return;
@@ -277,16 +408,12 @@ function App() {
         </div>
 
         <section className="map-card">
-          <div className="map-grid">
-            <span className="street street-a" />
-            <span className="street street-b" />
-            <span className="street street-c" />
-            <span className="route route-a" />
-            <span className="route route-b" />
-            <span className="map-pin start"><MapPin size={17} /></span>
-            <span className="map-pin car"><CarFront size={17} /></span>
-            <span className="map-pin end"><Navigation2 size={17} /></span>
-          </div>
+          <RouteMap
+            origin={isPassenger ? origin : ride.origin}
+            destination={isPassenger ? destination : ride.destination}
+            ride={ride}
+            onRouteReady={setRoutePreview}
+          />
 
           <div className="eta-pill">
             <small>{isPassenger ? 'Motorista chega em' : 'Proxima area forte'}</small>
@@ -310,6 +437,7 @@ function App() {
               paymentMethod={paymentMethod}
               setPaymentMethod={setPaymentMethod}
               estimate={estimate}
+              routePreview={routePreview}
             />
           ) : (
             <DriverView online={online} setOnline={setOnline} ride={ride} connected={connected} emitRide={emitRide} />
@@ -357,6 +485,7 @@ function PassengerView({
   paymentMethod,
   setPaymentMethod,
   estimate,
+  routePreview,
 }) {
   const hasActiveRide = !['idle', 'completed', 'cancelled'].includes(ride.status);
   const passengerSteps = [
@@ -425,18 +554,30 @@ function PassengerView({
               <strong>{rideOption.name}</strong>
               <small>{rideOption.time} de espera - {rideOption.note}</small>
             </div>
-              <b>{estimateRoute(origin, destination, rideOption).price}</b>
+              <b>{estimateRouteWithDriver(origin, destination, rideOption, estimate.isReady ? { originCoords: routePreview?.originCoords } : null).price}</b>
             </button>
           ))}
         </div>
       )}
 
       {!hasActiveRide && estimate.isReady && (
-        <div className="fare-summary">
-          <span><Clock3 size={17} /> {estimate.durationMin} min</span>
-          <span><Navigation2 size={17} /> {estimate.distanceKm} km</span>
-          <strong>{paymentMethod || 'Escolha o pagamento'}</strong>
-        </div>
+        estimate.hasDriver ? (
+          <div className="fare-summary">
+            <span><Clock3 size={17} /> {estimate.durationMin} min</span>
+            <span><Navigation2 size={17} /> {estimate.distanceKm} km percurso</span>
+            <span><CarFront size={17} /> {estimate.pickupDistanceKm} km motorista</span>
+            <span>{estimate.billableKm} km x R$ {estimate.ratePerKm.toFixed(2).replace('.', ',')}</span>
+            <strong>{paymentMethod || 'Escolha o pagamento'}</strong>
+          </div>
+        ) : (
+          <div className="availability-warning">
+            <CarFront size={18} />
+            <div>
+              <strong>Nenhum motorista disponivel</strong>
+              <small>Nao encontramos motorista em um raio de 5 km da origem informada.</small>
+            </div>
+          </div>
+        )
       )}
 
       <article className="safety-card">
@@ -553,6 +694,14 @@ function RideStatusCard({ ride, emitRide, role }) {
           <strong>{ride.distanceKm || '0'} km - {ride.durationMin || '0'} min</strong>
         </div>
         <div>
+          <small>Motorista ate voce</small>
+          <strong>{ride.pickupDistanceKm || '0'} km</strong>
+        </div>
+        <div>
+          <small>Km cobrados</small>
+          <strong>{ride.billableKm || ride.distanceKm || '0'} km x R$ {Number(ride.ratePerKm || 0).toFixed(2).replace('.', ',')}</strong>
+        </div>
+        <div>
           <small>Pagamento</small>
           <strong>{ride.paymentMethod || 'Nao informado'}</strong>
         </div>
@@ -582,6 +731,79 @@ function Quality({ icon: Icon, label, value }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function RouteMap({ origin, destination, ride, onRouteReady }) {
+  const mapElementRef = useRef(null);
+  const mapRef = useRef(null);
+  const layerRef = useRef(null);
+
+  useEffect(() => {
+    if (!mapElementRef.current || mapRef.current) return;
+
+    mapRef.current = L.map(mapElementRef.current, {
+      zoomControl: false,
+      attributionControl: false,
+      dragging: true,
+      scrollWheelZoom: false,
+      doubleClickZoom: false,
+    }).setView([-23.5614, -46.6559], 12);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+    }).addTo(mapRef.current);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function drawRoute() {
+      if (!mapRef.current) return;
+
+      const activeOrigin = ride.originCoords || (await geocodeAddress(origin || '', 0));
+      if (cancelled || !activeOrigin) return;
+      const activeDestination = ride.destinationCoords || (await geocodeAddress(destination || '', 1));
+      if (cancelled) return;
+
+      const endPoint = activeDestination || [activeOrigin[0] + 0.035, activeOrigin[1] - 0.035];
+      onRouteReady?.({ originCoords: activeOrigin, destinationCoords: endPoint });
+
+      if (layerRef.current) layerRef.current.remove();
+      const group = L.layerGroup().addTo(mapRef.current);
+      layerRef.current = group;
+
+      const originIcon = L.divIcon({ className: 'route-marker origin-marker', html: 'A', iconSize: [30, 30] });
+      const destinationIcon = L.divIcon({ className: 'route-marker destination-marker', html: 'B', iconSize: [30, 30] });
+      const midPoint = [(activeOrigin[0] + endPoint[0]) / 2 + 0.012, (activeOrigin[1] + endPoint[1]) / 2 - 0.01];
+
+      L.marker(activeOrigin, { icon: originIcon }).addTo(group);
+      L.marker(endPoint, { icon: destinationIcon }).addTo(group);
+      L.polyline([activeOrigin, midPoint, endPoint], {
+        color: '#e3132c',
+        weight: 6,
+        opacity: 0.94,
+        lineCap: 'round',
+        lineJoin: 'round',
+      }).addTo(group);
+
+      mapRef.current.fitBounds([activeOrigin, endPoint], { padding: [34, 34], maxZoom: 14 });
+    }
+
+    drawRoute();
+    return () => {
+      cancelled = true;
+    };
+  }, [origin, destination, ride.originCoords, ride.destinationCoords, onRouteReady]);
+
+  return (
+    <>
+      <div className="route-map" ref={mapElementRef} />
+      <div className="map-route-label">
+        <span><MapPin size={14} /> {origin || 'Origem'}</span>
+        <span><Navigation2 size={14} /> {destination || 'Destino'}</span>
+      </div>
+    </>
   );
 }
 

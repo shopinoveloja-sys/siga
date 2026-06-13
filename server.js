@@ -27,6 +27,13 @@ const initialRide = {
   paymentMethod: null,
   distanceKm: null,
   durationMin: null,
+  pickupDistanceKm: null,
+  billableKm: null,
+  ratePerKm: null,
+  assignedDriverName: null,
+  assignedDriverDistanceKm: null,
+  originCoords: null,
+  destinationCoords: null,
   passenger: 'Passageiro SIGA',
   driver: null,
   vehicle: null,
@@ -60,6 +67,13 @@ function applyRideEvent(event, payload = {}) {
       paymentMethod: payload.paymentMethod || 'Carteira SIGA',
       distanceKm: payload.distanceKm || '8.2',
       durationMin: payload.durationMin || '18',
+      pickupDistanceKm: payload.pickupDistanceKm || '5.0',
+      billableKm: payload.billableKm || payload.distanceKm || '8.2',
+      ratePerKm: payload.ratePerKm || '3.10',
+      assignedDriverName: payload.assignedDriverName || 'Marina Prado',
+      assignedDriverDistanceKm: payload.assignedDriverDistanceKm || payload.pickupDistanceKm || '5.0',
+      originCoords: payload.originCoords || null,
+      destinationCoords: payload.destinationCoords || null,
       driver: null,
       vehicle: null,
     });
@@ -69,7 +83,7 @@ function applyRideEvent(event, payload = {}) {
   if (event === 'ride:accept' && ride.status === 'requested') {
     updateRide({
       status: 'accepted',
-      driver: 'Marina Prado',
+      driver: ride.assignedDriverName || 'Marina Prado',
       vehicle: 'Honda City vermelho - SIGA-2048',
     });
     return true;
