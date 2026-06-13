@@ -101,9 +101,11 @@ async function loadGoogleMaps() {
       return new Promise((resolve, reject) => {
         const existingScript = document.querySelector('script[data-siga-google-maps]');
         if (existingScript) {
-          existingScript.addEventListener('load', () => resolve(window.google.maps), { once: true });
-          existingScript.addEventListener('error', reject, { once: true });
-          return;
+          if (window.google?.maps) {
+            resolve(window.google.maps);
+            return;
+          }
+          existingScript.remove();
         }
 
         const callbackName = '__sigaGoogleMapsReady';
