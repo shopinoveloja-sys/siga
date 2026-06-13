@@ -1,8 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { io } from 'socket.io-client';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
 import {
   Bell,
   CarFront,
@@ -735,70 +733,26 @@ function Quality({ icon: Icon, label, value }) {
 }
 
 function RouteMap({ origin, destination, ride, onRouteReady }) {
-  const mapElementRef = useRef(null);
-  const mapRef = useRef(null);
-  const layerRef = useRef(null);
-
   useEffect(() => {
-    if (!mapElementRef.current || mapRef.current) return;
-
-    mapRef.current = L.map(mapElementRef.current, {
-      zoomControl: false,
-      attributionControl: false,
-      dragging: true,
-      scrollWheelZoom: false,
-      doubleClickZoom: false,
-    }).setView([-23.5614, -46.6559], 12);
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-    }).addTo(mapRef.current);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function drawRoute() {
-      if (!mapRef.current) return;
-
-      const activeOrigin = ride.originCoords || (await geocodeAddress(origin || '', 0));
-      if (cancelled || !activeOrigin) return;
-      const activeDestination = ride.destinationCoords || (await geocodeAddress(destination || '', 1));
-      if (cancelled) return;
-
-      const endPoint = activeDestination || [activeOrigin[0] + 0.035, activeOrigin[1] - 0.035];
-      onRouteReady?.({ originCoords: activeOrigin, destinationCoords: endPoint });
-
-      if (layerRef.current) layerRef.current.remove();
-      const group = L.layerGroup().addTo(mapRef.current);
-      layerRef.current = group;
-
-      const originIcon = L.divIcon({ className: 'route-marker origin-marker', html: 'A', iconSize: [30, 30] });
-      const destinationIcon = L.divIcon({ className: 'route-marker destination-marker', html: 'B', iconSize: [30, 30] });
-      const midPoint = [(activeOrigin[0] + endPoint[0]) / 2 + 0.012, (activeOrigin[1] + endPoint[1]) / 2 - 0.01];
-
-      L.marker(activeOrigin, { icon: originIcon }).addTo(group);
-      L.marker(endPoint, { icon: destinationIcon }).addTo(group);
-      L.polyline([activeOrigin, midPoint, endPoint], {
-        color: '#e3132c',
-        weight: 6,
-        opacity: 0.94,
-        lineCap: 'round',
-        lineJoin: 'round',
-      }).addTo(group);
-
-      mapRef.current.fitBounds([activeOrigin, endPoint], { padding: [34, 34], maxZoom: 14 });
-    }
-
-    drawRoute();
-    return () => {
-      cancelled = true;
-    };
+    const activeOrigin = ride.originCoords || fallbackCoords(origin || '', 0);
+    const activeDestination = ride.destinationCoords || fallbackCoords(destination || '', 1);
+    onRouteReady?.({ originCoords: activeOrigin, destinationCoords: activeDestination });
   }, [origin, destination, ride.originCoords, ride.destinationCoords, onRouteReady]);
 
   return (
     <>
-      <div className="route-map" ref={mapElementRef} />
+      <div className="route-map" aria-label="Mapa do trajeto">
+        <span className="map-street map-street-one" />
+        <span className="map-street map-street-two" />
+        <span className="map-street map-street-three" />
+        <span className="map-street map-street-four" />
+        <svg className="route-drawing" viewBox="0 0 360 220" preserveAspectRatio="none" aria-hidden="true">
+          <path className="route-shadow" d="M62 154 C122 112 168 126 214 84 S286 64 316 38" />
+          <path className="route-path" d="M62 154 C122 112 168 126 214 84 S286 64 316 38" />
+        </svg>
+        <span className="route-dot route-dot-a">A</span>
+        <span className="route-dot route-dot-b">B</span>
+      </div>
       <div className="map-route-label">
         <span><MapPin size={14} /> {origin || 'Origem'}</span>
         <span><Navigation2 size={14} /> {destination || 'Destino'}</span>
