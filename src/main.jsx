@@ -102,12 +102,54 @@ function App() {
     };
   }, []);
 
-  function handleMainAction() {
-    if (!socket) return;
+  useEffect(() => {
+    let alive = true;
 
+    async function syncRide() {
+      try {
+        const response = await fetch('/api/ride', { cache: 'no-store' });
+        if (!response.ok) return;
+        const nextRide = await response.json();
+        if (alive) setRide(nextRide);
+      } catch {
+        // Socket.IO remains the primary realtime channel; polling is only a fallback.
+      }
+    }
+
+    syncRide();
+    const interval = window.setInterval(syncRide, 2500);
+    return () => {
+      alive = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  async function emitRide(event, payload) {
+    try {
+      const response = await fetch('/api/ride/event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event, payload }),
+      });
+      const result = await response.json();
+      if (result.ride) setRide(result.ride);
+    } catch {
+      socket?.emit(event, payload);
+      window.setTimeout(async () => {
+        try {
+          const response = await fetch('/api/ride', { cache: 'no-store' });
+          if (response.ok) setRide(await response.json());
+        } catch {
+          // Keep the current UI state if the fallback request fails.
+        }
+      }, 400);
+    }
+  }
+
+  function handleMainAction() {
     if (isPassenger) {
       if (ride.status === 'idle' || ride.status === 'cancelled' || ride.status === 'completed') {
-        socket.emit('ride:request', {
+        emitRide('ride:request', {
           category: activeRide.name,
           price: activeRide.price,
         });
@@ -129,7 +171,7 @@ function App() {
       cancelled: 'ride:reset',
     };
     const event = eventByStatus[ride.status];
-    if (event) socket.emit(event);
+    if (event) emitRide(event);
   }
 
   if (!entered) {
@@ -222,10 +264,10 @@ function App() {
               setSelectedRide={setSelectedRide}
               ride={ride}
               connected={connected}
-              socket={socket}
+              emitRide={emitRide}
             />
           ) : (
-            <DriverView online={online} setOnline={setOnline} ride={ride} connected={connected} socket={socket} />
+            <DriverView online={online} setOnline={setOnline} ride={ride} connected={connected} emitRide={emitRide} />
           )}
         </section>
 
@@ -256,7 +298,7 @@ function App() {
   );
 }
 
-function PassengerView({ activeRide, selectedRide, setSelectedRide, ride, connected, socket }) {
+function PassengerView({ activeRide, selectedRide, setSelectedRide, ride, connected, emitRide }) {
   const hasActiveRide = !['idle', 'completed', 'cancelled'].includes(ride.status);
 
   return (
@@ -283,7 +325,7 @@ function PassengerView({ activeRide, selectedRide, setSelectedRide, ride, connec
       </div>
 
       {hasActiveRide ? (
-        <RideStatusCard ride={ride} socket={socket} role="passenger" />
+        <RideStatusCard ride={ride} emitRide={emitRide} role="passenger" />
       ) : (
         <div className="ride-list">
           {rideOptions.map((rideOption, index) => (
@@ -314,7 +356,7 @@ function PassengerView({ activeRide, selectedRide, setSelectedRide, ride, connec
   );
 }
 
-function DriverView({ online, setOnline, ride, connected, socket }) {
+function DriverView({ online, setOnline, ride, connected, emitRide }) {
   const hasRequest = ride.status !== 'idle';
 
   return (
@@ -345,7 +387,7 @@ function DriverView({ online, setOnline, ride, connected, socket }) {
       </div>
 
       {hasRequest ? (
-        <RideStatusCard ride={ride} socket={socket} role="driver" />
+        <RideStatusCard ride={ride} emitRide={emitRide} role="driver" />
       ) : (
         <article className="trip-card empty-trip">
           <RadioTower size={26} />
@@ -376,7 +418,7 @@ function RealtimeBanner({ connected, ride }) {
   );
 }
 
-function RideStatusCard({ ride, socket, role }) {
+function RideStatusCard({ ride, emitRide, role }) {
   const canPassengerCancel = role === 'passenger' && ['requested', 'accepted', 'arrived'].includes(ride.status);
   const canReset = ['completed', 'cancelled'].includes(ride.status);
 
@@ -404,8 +446,8 @@ function RideStatusCard({ ride, socket, role }) {
       </div>
 
       <div className="ride-actions">
-        {canPassengerCancel && <button onClick={() => socket?.emit('ride:cancel')}>Cancelar pedido</button>}
-        {canReset && <button onClick={() => socket?.emit('ride:reset')}>Nova simulacao</button>}
+        {canPassengerCancel && <button onClick={() => emitRide('ride:cancel')}>Cancelar pedido</button>}
+        {canReset && <button onClick={() => emitRide('ride:reset')}>Nova simulacao</button>}
       </div>
     </article>
   );

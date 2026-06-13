@@ -15,6 +15,8 @@ const io = new Server(server, {
 
 const PORT = Number(process.env.PORT || 80);
 
+app.use(express.json());
+
 const initialRide = {
   id: null,
   status: 'idle',
@@ -43,10 +45,8 @@ function updateRide(next) {
   publish();
 }
 
-io.on('connection', (socket) => {
-  socket.emit('ride:update', ride);
-
-  socket.on('ride:request', (payload = {}) => {
+function applyRideEvent(event, payload = {}) {
+  if (event === 'ride:request') {
     updateRide({
       id: `SIGA-${Math.floor(1000 + Math.random() * 9000)}`,
       status: 'requested',
@@ -55,45 +55,96 @@ io.on('connection', (socket) => {
       driver: null,
       vehicle: null,
     });
-  });
+    return true;
+  }
 
-  socket.on('ride:accept', () => {
-    if (ride.status !== 'requested') return;
+  if (event === 'ride:accept' && ride.status === 'requested') {
     updateRide({
       status: 'accepted',
       driver: 'Marina Prado',
       vehicle: 'Honda City vermelho - SIGA-2048',
     });
+    return true;
+  }
+
+  if (event === 'ride:arrive' && ride.status === 'accepted') {
+    updateRide({ status: 'arrived' });
+    return true;
+  }
+
+  if (event === 'ride:start' && ride.status === 'arrived') {
+    updateRide({ status: 'started' });
+    return true;
+  }
+
+  if (event === 'ride:finish' && ride.status === 'started') {
+    updateRide({ status: 'completed' });
+    return true;
+  }
+
+  if (event === 'ride:cancel' && ride.status !== 'idle') {
+    updateRide({ status: 'cancelled' });
+    return true;
+  }
+
+  if (event === 'ride:reset') {
+    ride = { ...initialRide, updatedAt: Date.now() };
+    publish();
+    return true;
+  }
+
+  return false;
+}
+
+io.on('connection', (socket) => {
+  socket.emit('ride:update', ride);
+
+  socket.on('ride:request', (payload = {}) => {
+    applyRideEvent('ride:request', payload);
+  });
+
+  socket.on('ride:accept', () => {
+    applyRideEvent('ride:accept');
   });
 
   socket.on('ride:arrive', () => {
-    if (ride.status !== 'accepted') return;
-    updateRide({ status: 'arrived' });
+    applyRideEvent('ride:arrive');
   });
 
   socket.on('ride:start', () => {
-    if (ride.status !== 'arrived') return;
-    updateRide({ status: 'started' });
+    applyRideEvent('ride:start');
   });
 
   socket.on('ride:finish', () => {
-    if (ride.status !== 'started') return;
-    updateRide({ status: 'completed' });
+    applyRideEvent('ride:finish');
   });
 
   socket.on('ride:cancel', () => {
-    if (ride.status === 'idle') return;
-    updateRide({ status: 'cancelled' });
+    applyRideEvent('ride:cancel');
   });
 
   socket.on('ride:reset', () => {
-    ride = { ...initialRide, updatedAt: Date.now() };
-    publish();
+    applyRideEvent('ride:reset');
   });
 });
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, status: ride.status });
+});
+
+app.get('/api/ride', (_req, res) => {
+  res.json(ride);
+});
+
+app.post('/api/ride/reset', (_req, res) => {
+  applyRideEvent('ride:reset');
+  res.json(ride);
+});
+
+app.post('/api/ride/event', (req, res) => {
+  const { event, payload } = req.body || {};
+  const applied = applyRideEvent(event, payload);
+  res.status(applied ? 200 : 409).json({ applied, ride });
 });
 
 app.use(express.static(path.join(__dirname, 'dist')));
