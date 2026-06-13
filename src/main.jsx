@@ -106,13 +106,30 @@ async function loadGoogleMaps() {
           return;
         }
 
+        const callbackName = '__sigaGoogleMapsReady';
+        const timeout = window.setTimeout(() => reject(new Error('load-timeout')), 12000);
+        window[callbackName] = () => {
+          window.clearTimeout(timeout);
+          if (window.google?.maps) {
+            resolve(window.google.maps);
+            return;
+          }
+          reject(new Error('load-failed'));
+        };
+        window.gm_authFailure = () => {
+          window.clearTimeout(timeout);
+          reject(new Error('auth-failed'));
+        };
+
         const script = document.createElement('script');
         script.dataset.sigaGoogleMaps = 'true';
         script.async = true;
         script.defer = true;
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(config.googleMapsApiKey)}&libraries=places,geometry&v=weekly`;
-        script.onload = () => resolve(window.google.maps);
-        script.onerror = () => reject(new Error('load-failed'));
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(config.googleMapsApiKey)}&libraries=places,geometry&v=weekly&loading=async&callback=${callbackName}`;
+        script.onerror = () => {
+          window.clearTimeout(timeout);
+          reject(new Error('load-failed'));
+        };
         document.head.appendChild(script);
       });
     });
