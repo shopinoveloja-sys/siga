@@ -134,7 +134,7 @@ async function loadGoogleMaps() {
         script.dataset.sigaGoogleMaps = 'true';
         script.async = true;
         script.defer = true;
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(config.googleMapsApiKey)}&libraries=places,geometry&v=weekly&loading=async&callback=${callbackName}`;
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(config.googleMapsApiKey)}&libraries=places,geometry&v=beta&loading=async&callback=${callbackName}`;
         script.onerror = () => {
           window.clearTimeout(timeout);
           reject(new Error('load-failed'));
@@ -947,43 +947,68 @@ const recentDestinations = [
 ];
 
 function PlaceInput({ value, onChange, onPlaceSelect, placeholder }) {
-  const inputRef = useRef(null);
+  const hostRef = useRef(null);
   const autocompleteRef = useRef(null);
   const placeSelectRef = useRef(onPlaceSelect);
+  const changeRef = useRef(onChange);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     placeSelectRef.current = onPlaceSelect;
   }, [onPlaceSelect]);
 
   useEffect(() => {
-    let listener = null;
+    changeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
+    let selectListener = null;
+    let inputListener = null;
     let cancelled = false;
 
     async function setupAutocomplete() {
-      if (!inputRef.current || autocompleteRef.current) return;
+      if (!hostRef.current || autocompleteRef.current) return;
 
       try {
         const maps = await loadGoogleMaps();
-        if (cancelled || !inputRef.current || !maps.places?.Autocomplete) return;
+        const placesLibrary = await maps.importLibrary('places');
+        const PlaceAutocompleteElement = placesLibrary.PlaceAutocompleteElement || maps.places?.PlaceAutocompleteElement;
+        if (cancelled || !hostRef.current || !PlaceAutocompleteElement) return;
 
-        const bounds = new maps.LatLngBounds(
-          { lat: -20.42, lng: -40.43 },
-          { lat: -20.12, lng: -40.16 },
-        );
-        autocompleteRef.current = new maps.places.Autocomplete(inputRef.current, {
-          bounds,
-          componentRestrictions: { country: 'br' },
-          fields: ['formatted_address', 'geometry', 'name'],
-        });
+        const element = new PlaceAutocompleteElement();
+        element.placeholder = placeholder;
+        element.includedRegionCodes = ['br'];
+        element.locationBias = {
+          south: -20.42,
+          west: -40.43,
+          north: -20.12,
+          east: -40.16,
+        };
+        element.value = value || '';
 
-        listener = autocompleteRef.current.addListener('place_changed', () => {
-          const place = autocompleteRef.current.getPlace();
-          const location = place?.geometry?.location;
+        inputListener = () => {
+          changeRef.current(element.value || '');
+        };
+        element.addEventListener('input', inputListener);
+
+        selectListener = async ({ placePrediction }) => {
+          const place = placePrediction.toPlace();
+          await place.fetchFields({
+            fields: ['displayName', 'formattedAddress', 'location'],
+          });
+          const location = place.location;
           if (!location) return;
 
-          const label = place.formatted_address || place.name || inputRef.current.value;
-          placeSelectRef.current(label, [location.lat(), location.lng()]);
-        });
+          const lat = typeof location.lat === 'function' ? location.lat() : location.lat;
+          const lng = typeof location.lng === 'function' ? location.lng() : location.lng;
+          const label = place.formattedAddress || place.displayName || element.value || '';
+          placeSelectRef.current(label, [lat, lng]);
+        };
+        element.addEventListener('gmp-select', selectListener);
+
+        autocompleteRef.current = element;
+        hostRef.current.replaceChildren(element);
+        setReady(true);
       } catch {
         // Plain typing still works if Google Places is unavailable.
       }
@@ -993,17 +1018,30 @@ function PlaceInput({ value, onChange, onPlaceSelect, placeholder }) {
 
     return () => {
       cancelled = true;
-      if (listener) listener.remove();
+      const element = autocompleteRef.current;
+      if (element && inputListener) element.removeEventListener('input', inputListener);
+      if (element && selectListener) element.removeEventListener('gmp-select', selectListener);
+      autocompleteRef.current = null;
     };
   }, []);
 
+  useEffect(() => {
+    if (autocompleteRef.current && autocompleteRef.current.value !== value) {
+      autocompleteRef.current.value = value || '';
+    }
+  }, [value]);
+
   return (
-    <input
-      ref={inputRef}
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-    />
+    <div className="place-input-host">
+      <div ref={hostRef} />
+      {!ready && (
+        <input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+        />
+      )}
+    </div>
   );
 }
 

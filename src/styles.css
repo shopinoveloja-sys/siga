@@ -510,7 +510,8 @@ button {
   font-size: 12px;
 }
 
-.plan-card input {
+.plan-card input,
+.place-input-host gmp-place-autocomplete {
   min-height: 36px;
   border: 0;
   color: white;
@@ -518,6 +519,16 @@ button {
   font: inherit;
   font-weight: 800;
   outline: none;
+}
+
+.place-input-host {
+  min-height: 36px;
+}
+
+.place-input-host > div,
+.place-input-host gmp-place-autocomplete {
+  display: block;
+  width: 100%;
 }
 
 .recent-list {
