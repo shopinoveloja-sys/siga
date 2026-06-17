@@ -169,11 +169,16 @@ function findFarthestDriverWithinRadius(originCoords, availableDrivers = [], rad
     .sort((a, b) => b.distanceKm - a.distanceKm)[0] || null;
 }
 
+function isCurrentLocationLabel(address) {
+  return !address?.trim() || address.trim().toLowerCase() === 'seu local';
+}
+
 function fallbackCoords(address, offset = 0) {
+  if (isCurrentLocationLabel(address)) return null;
   const normalized = address.toLowerCase();
   const found = fallbackLocations.find((item) => normalized.includes(item.key));
   if (found) return found.coords;
-  return [-23.5614 + offset * 0.035, -46.6559 - offset * 0.04];
+  return null;
 }
 
 function normalizeSearchAddress(address) {
@@ -195,7 +200,7 @@ async function geocodeAddress(address, offset) {
     url.searchParams.set('format', 'json');
     url.searchParams.set('limit', '1');
     url.searchParams.set('countrycodes', 'br');
-    url.searchParams.set('q', `${query}, Sao Paulo, Brasil`);
+    url.searchParams.set('q', `${query}, Brasil`);
     const response = await fetch(url, { headers: { Accept: 'application/json' } });
     const [result] = await response.json();
     if (result?.lat && result?.lon) return [Number(result.lat), Number(result.lon)];
@@ -245,6 +250,7 @@ function estimateRouteWithDriver(origin, destination, ride, routePreview, availa
   const routeDistanceKm = Number(routePreview?.routeDistanceKm);
   const routeDurationMin = Number(routePreview?.routeDurationMin);
   const routeFailed = routePreview?.routeStatus === 'failed';
+  const routeWaitingLocation = routePreview?.routeStatus === 'waiting-location';
   const routeBase = routeDistanceKm > 0
     ? {
         ...base,
@@ -261,8 +267,8 @@ function estimateRouteWithDriver(origin, destination, ride, routePreview, availa
         pickupDistanceKm: 0,
         billableKm: 0,
         priceNumber: 0,
-        routeStatus: routeFailed ? 'failed' : 'loading',
-        price: routeFailed ? 'Rota indisponivel' : 'Calculando rota',
+        routeStatus: routeWaitingLocation ? 'waiting-location' : routeFailed ? 'failed' : 'loading',
+        price: routeWaitingLocation ? 'Aguardando local' : routeFailed ? 'Rota indisponivel' : 'Calculando rota',
       };
   const originCoords = routePreview?.originCoords || fallbackCoords(origin, 0);
   const selectedDriver = routeBase.isReady ? findFarthestDriverWithinRadius(originCoords, availableDrivers, 5) : null;
@@ -273,7 +279,7 @@ function estimateRouteWithDriver(origin, destination, ride, routePreview, availa
       hasDriver: false,
       driver: null,
       price: destination.trim()
-        ? routeFailed ? 'Rota indisponivel' : 'Calculando rota'
+        ? routeWaitingLocation ? 'Aguardando local' : routeFailed ? 'Rota indisponivel' : 'Calculando rota'
         : 'Informe rota',
     };
   }
@@ -401,10 +407,20 @@ function App() {
         setRoutePreview((current) => ({
           ...current,
           originCoords: coords,
+          routeDistanceKm: null,
+          routeDurationMin: null,
+          routeStatus: destination.trim() ? 'loading' : 'idle',
         }));
       },
       () => {
         setOrigin((current) => current.trim() ? current : 'Seu local');
+        setRoutePreview((current) => ({
+          ...(current || {}),
+          originCoords: null,
+          routeDistanceKm: null,
+          routeDurationMin: null,
+          routeStatus: destination.trim() ? 'waiting-location' : 'idle',
+        }));
       },
       {
         enableHighAccuracy: true,
@@ -412,7 +428,7 @@ function App() {
         timeout: 8000,
       },
     );
-  }, [entered, isPassenger]);
+  }, [destination, entered, isPassenger]);
 
   useEffect(() => {
     let alive = true;
@@ -538,6 +554,17 @@ function App() {
 
   function updateOrigin(nextOrigin) {
     setOrigin(nextOrigin);
+    if (isCurrentLocationLabel(nextOrigin)) {
+      setRoutePreview((current) => ({
+        ...(current || {}),
+        originCoords: userLocationCoords,
+        routeDistanceKm: null,
+        routeDurationMin: null,
+        routeStatus: userLocationCoords && destination.trim() ? 'loading' : 'waiting-location',
+      }));
+      return;
+    }
+
     if (nextOrigin.trim().toLowerCase() !== 'seu local') {
       setUserLocationCoords(null);
       setRoutePreview((current) => ({
@@ -557,7 +584,9 @@ function App() {
       destinationCoords: null,
       routeDistanceKm: null,
       routeDurationMin: null,
-      routeStatus: nextDestination.trim() ? 'loading' : 'idle',
+      routeStatus: nextDestination.trim()
+        ? userLocationCoords || current?.originCoords || !isCurrentLocationLabel(origin) ? 'loading' : 'waiting-location'
+        : 'idle',
     }));
   }
 
@@ -580,7 +609,9 @@ function App() {
       destinationCoords: coords,
       routeDistanceKm: null,
       routeDurationMin: null,
-      routeStatus: label.trim() ? 'loading' : 'idle',
+      routeStatus: label.trim()
+        ? userLocationCoords || current?.originCoords || !isCurrentLocationLabel(origin) ? 'loading' : 'waiting-location'
+        : 'idle',
     }));
   }
 
@@ -1208,6 +1239,8 @@ function PassengerAppExperience({
               <div className={estimate.routeStatus === 'failed' ? 'passenger-unavailable' : 'passenger-price-rule'}>
                 {estimate.routeStatus === 'failed'
                   ? 'Nao foi possivel calcular a rota real agora. Confira a origem, o destino e tente novamente.'
+                  : estimate.routeStatus === 'waiting-location'
+                    ? 'Permita a localizacao ou selecione um endereco de origem para calcular a rota.'
                   : 'Calculando rota real pelo Google Maps...'}
               </div>
             )}
@@ -1697,6 +1730,18 @@ function RouteMap({ origin, destination, ride, onRouteReady, driverLocations = [
         || driverLocations.find((driver) => driver.name === ride.assignedDriverName)
       : null;
 
+    if (!activeOrigin && isCurrentLocationLabel(origin)) {
+      onRouteReady?.({
+        originCoords: null,
+        destinationCoords: activeDestination,
+        routeDistanceKm: null,
+        routeDurationMin: null,
+        routeStatus: 'waiting-location',
+      });
+      setMapState('waiting-location');
+      return undefined;
+    }
+
     onRouteReady?.({ originCoords: activeOrigin, destinationCoords: activeDestination, routeStatus: destination?.trim() ? 'loading' : 'idle' });
 
     async function drawMap() {
@@ -1710,7 +1755,7 @@ function RouteMap({ origin, destination, ride, onRouteReady, driverLocations = [
         const geocoder = new maps.Geocoder();
         const geocode = (address, fallback) => new Promise((resolve) => {
           if (!address?.trim()) {
-            resolve({ lat: fallback[0], lng: fallback[1] });
+            resolve(fallback ? { lat: fallback[0], lng: fallback[1] } : null);
             return;
           }
 
@@ -1725,7 +1770,7 @@ function RouteMap({ origin, destination, ride, onRouteReady, driverLocations = [
                 resolve({ lat: location.lat(), lng: location.lng() });
                 return;
               }
-              resolve({ lat: fallback[0], lng: fallback[1] });
+              resolve(fallback ? { lat: fallback[0], lng: fallback[1] } : null);
             },
           );
         });
@@ -1736,6 +1781,18 @@ function RouteMap({ origin, destination, ride, onRouteReady, driverLocations = [
         const destinationLatLng = ride.destinationCoords
           ? { lat: ride.destinationCoords[0], lng: ride.destinationCoords[1] }
           : await geocode(destination || origin, activeDestination);
+
+        if (!originLatLng || !destinationLatLng) {
+          onRouteReady?.({
+            originCoords: activeOrigin,
+            destinationCoords: activeDestination,
+            routeDistanceKm: null,
+            routeDurationMin: null,
+            routeStatus: !originLatLng && isCurrentLocationLabel(origin) ? 'waiting-location' : 'failed',
+          });
+          setMapState(!originLatLng && isCurrentLocationLabel(origin) ? 'waiting-location' : 'fallback');
+          return;
+        }
 
         if (cancelled || !mapNodeRef.current) return;
 
@@ -1879,6 +1936,11 @@ function RouteMap({ origin, destination, ride, onRouteReady, driverLocations = [
       <div className="route-map" aria-label="Mapa do trajeto">
         <div className="google-map-canvas" ref={mapNodeRef} />
         {mapState === 'loading' && <div className="map-loading">Carregando mapa real...</div>}
+        {mapState === 'waiting-location' && (
+          <div className="map-loading map-warning">
+            Permita a localizacao ou escolha um endereco de origem.
+          </div>
+        )}
         {mapState === 'fallback' && (
           <div className="map-loading map-warning">
             Ative a chave do Google Maps para ver ruas reais e calcular a rota.
