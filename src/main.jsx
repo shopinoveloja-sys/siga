@@ -250,7 +250,8 @@ function estimateRouteWithDriver(origin, destination, ride, routePreview, availa
   const routeDistanceKm = Number(routePreview?.routeDistanceKm);
   const routeDurationMin = Number(routePreview?.routeDurationMin);
   const routeFailed = routePreview?.routeStatus === 'failed';
-  const routeWaitingLocation = routePreview?.routeStatus === 'waiting-location';
+  const routeWaitingLocation = routePreview?.routeStatus === 'waiting-location'
+    || (isCurrentLocationLabel(origin) && !routePreview?.originCoords);
   const routeBase = routeDistanceKm > 0
     ? {
         ...base,
@@ -396,10 +397,24 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!entered || !isPassenger) return;
-    if (!navigator.geolocation) return;
+    if (!entered || !isPassenger) return undefined;
+    if (!navigator.geolocation) {
+      setRoutePreview((current) => ({
+        ...(current || {}),
+        originCoords: null,
+        routeDistanceKm: null,
+        routeDurationMin: null,
+        routeStatus: destination.trim() ? 'waiting-location' : 'idle',
+      }));
+      return undefined;
+    }
 
-    navigator.geolocation.getCurrentPosition(
+    setRoutePreview((current) => ({
+      ...(current || {}),
+      routeStatus: destination.trim() && !current?.originCoords ? 'waiting-location' : current?.routeStatus || 'idle',
+    }));
+
+    const watchId = navigator.geolocation.watchPosition(
       (position) => {
         const coords = [position.coords.latitude, position.coords.longitude];
         setUserLocationCoords(coords);
@@ -424,10 +439,12 @@ function App() {
       },
       {
         enableHighAccuracy: true,
-        maximumAge: 120000,
-        timeout: 8000,
+        maximumAge: 15000,
+        timeout: 20000,
       },
     );
+
+    return () => navigator.geolocation.clearWatch(watchId);
   }, [destination, entered, isPassenger]);
 
   useEffect(() => {
@@ -1240,7 +1257,7 @@ function PassengerAppExperience({
                 {estimate.routeStatus === 'failed'
                   ? 'Nao foi possivel calcular a rota real agora. Confira a origem, o destino e tente novamente.'
                   : estimate.routeStatus === 'waiting-location'
-                    ? 'Permita a localizacao ou selecione um endereco de origem para calcular a rota.'
+                    ? `${driverLocations.length ? `${driverLocations.length} motorista online. ` : ''}Permita a localizacao ou selecione um endereco de origem para calcular a rota.`
                   : 'Calculando rota real pelo Google Maps...'}
               </div>
             )}
@@ -1554,6 +1571,18 @@ function DriverDemandMap({ ride, driverIdentity, driverLocations = [] }) {
         makeMarker(destinationLatLng, 'B', ride.destination || 'Destino', '#191114');
 
         const directionsService = new maps.DirectionsService();
+        const routeTimeout = window.setTimeout(() => {
+          if (cancelled) return;
+          onRouteReady?.({
+            originCoords: [originLatLng.lat, originLatLng.lng],
+            destinationCoords: [destinationLatLng.lat, destinationLatLng.lng],
+            routeDistanceKm: null,
+            routeDurationMin: null,
+            routeStatus: 'failed',
+          });
+          setMapState('fallback');
+        }, 16000);
+
         directionsService.route(
           {
             origin: originLatLng,
@@ -1562,6 +1591,7 @@ function DriverDemandMap({ ride, driverIdentity, driverLocations = [] }) {
           },
           (result, status) => {
             if (cancelled) return;
+            window.clearTimeout(routeTimeout);
 
             if (status === 'OK' && result) {
               directionsRef.current.setDirections(result);
