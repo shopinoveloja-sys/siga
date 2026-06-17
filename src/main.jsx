@@ -32,6 +32,7 @@ const rideOptions = [
 ];
 
 const paymentOptions = ['Pix', 'Cartao de credito', 'Carteira SIGA', 'Dinheiro'];
+const MAX_LOCATION_ACCURACY_METERS = 120;
 
 const driverStats = [
   { label: 'Hoje', value: 'R$ 186', icon: CircleDollarSign },
@@ -250,8 +251,13 @@ function estimateRouteWithDriver(origin, destination, ride, routePreview, availa
   const routeDistanceKm = Number(routePreview?.routeDistanceKm);
   const routeDurationMin = Number(routePreview?.routeDurationMin);
   const routeFailed = routePreview?.routeStatus === 'failed';
+  const originAccuracy = Number(routePreview?.originAccuracy);
+  const hasPoorCurrentLocationAccuracy = isCurrentLocationLabel(origin)
+    && Number.isFinite(originAccuracy)
+    && originAccuracy > MAX_LOCATION_ACCURACY_METERS;
   const routeWaitingLocation = routePreview?.routeStatus === 'waiting-location'
-    || (isCurrentLocationLabel(origin) && !routePreview?.originCoords);
+    || (isCurrentLocationLabel(origin) && !routePreview?.originCoords)
+    || hasPoorCurrentLocationAccuracy;
   const routeBase = routeDistanceKm > 0
     ? {
         ...base,
@@ -315,9 +321,11 @@ function estimateRouteWithDriver(origin, destination, ride, routePreview, availa
 }
 
 function routeFareKey(origin, destination, routePreview = {}) {
-  const originKey = isCurrentLocationLabel(origin)
-    ? 'current-location'
-    : origin.trim().toLowerCase();
+  const originKey = routePreview.originCoords
+    ? routePreview.originCoords.map((value) => Number(value).toFixed(4)).join(',')
+    : isCurrentLocationLabel(origin)
+      ? 'current-location'
+      : origin.trim().toLowerCase();
   const destinationKey = routePreview.destinationCoords
     ? routePreview.destinationCoords.map((value) => Number(value).toFixed(5)).join(',')
     : destination.trim().toLowerCase();
@@ -427,7 +435,13 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!rawEstimate.isReady || !rawEstimate.hasDriver || officialFares[fareKey]) return;
+    const accuracy = Number(routePreview?.originAccuracy);
+    const locationReady = !isCurrentLocationLabel(origin)
+      || (rawEstimate.routeStatus === 'ready'
+        && Number.isFinite(accuracy)
+        && accuracy <= MAX_LOCATION_ACCURACY_METERS);
+
+    if (!locationReady || !rawEstimate.isReady || !rawEstimate.hasDriver || officialFares[fareKey]) return;
 
     const lockedByRide = rideOptions.reduce((acc, rideOption) => {
       acc[rideOption.name] = buildOfficialEstimate(rawEstimate, rideOption);
@@ -437,7 +451,7 @@ function App() {
       ...current,
       [fareKey]: lockedByRide,
     }));
-  }, [fareKey, officialFares, rawEstimate]);
+  }, [fareKey, officialFares, origin, rawEstimate, routePreview?.originAccuracy]);
 
   useEffect(() => {
     if (!entered || !isPassenger) return undefined;
@@ -460,14 +474,22 @@ function App() {
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
         const coords = [position.coords.latitude, position.coords.longitude];
+        const accuracy = Math.round(position.coords.accuracy || 0);
         setUserLocationCoords(coords);
         setOrigin((current) => current.trim() ? current : 'Seu local');
         setRoutePreview((current) => ({
           ...current,
           originCoords: coords,
-          routeDistanceKm: current?.routeDistanceKm || null,
-          routeDurationMin: current?.routeDurationMin || null,
+          originAccuracy: accuracy,
+          routeDistanceKm: current?.originCoords && distanceBetweenKm(current.originCoords, coords) < 0.12
+            ? current?.routeDistanceKm || null
+            : null,
+          routeDurationMin: current?.originCoords && distanceBetweenKm(current.originCoords, coords) < 0.12
+            ? current?.routeDurationMin || null
+            : null,
           routeStatus: current?.routeStatus === 'ready'
+            && current?.originCoords
+            && distanceBetweenKm(current.originCoords, coords) < 0.12
             ? 'ready'
             : destination.trim() ? 'loading' : 'idle',
         }));
@@ -477,6 +499,7 @@ function App() {
         setRoutePreview((current) => ({
           ...(current || {}),
           originCoords: null,
+          originAccuracy: null,
           routeDistanceKm: null,
           routeDurationMin: null,
           routeStatus: destination.trim() ? 'waiting-location' : 'idle',
@@ -620,6 +643,7 @@ function App() {
       setRoutePreview((current) => ({
         ...(current || {}),
         originCoords: userLocationCoords,
+        originAccuracy: userLocationCoords ? 0 : null,
         routeDistanceKm: null,
         routeDurationMin: null,
         routeStatus: userLocationCoords && destination.trim() ? 'loading' : 'waiting-location',
@@ -632,6 +656,7 @@ function App() {
       setRoutePreview((current) => ({
         ...(current || {}),
         originCoords: null,
+        originAccuracy: null,
         routeDistanceKm: null,
         routeDurationMin: null,
         routeStatus: destination.trim() ? 'loading' : 'idle',
@@ -658,6 +683,7 @@ function App() {
     setRoutePreview((current) => ({
       ...(current || {}),
       originCoords: coords,
+      originAccuracy: 0,
       routeDistanceKm: null,
       routeDurationMin: null,
       routeStatus: destination.trim() ? 'loading' : 'idle',
@@ -1306,7 +1332,7 @@ function PassengerAppExperience({
                 {estimate.routeStatus === 'failed'
                   ? 'Nao foi possivel calcular a rota real agora. Confira a origem, o destino e tente novamente.'
                   : estimate.routeStatus === 'waiting-location'
-                    ? `${driverLocations.length ? `${driverLocations.length} motorista online. ` : ''}Permita a localizacao ou selecione um endereco de origem para calcular a rota.`
+                    ? `${driverLocations.length ? `${driverLocations.length} motorista online. ` : ''}${routePreview?.originAccuracy > MAX_LOCATION_ACCURACY_METERS ? `GPS ainda impreciso (${Math.round(routePreview.originAccuracy)} m). ` : ''}Permita a localizacao ou selecione um endereco de origem para calcular a rota.`
                   : 'Calculando rota real pelo Google Maps...'}
               </div>
             )}
