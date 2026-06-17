@@ -154,11 +154,28 @@ function distanceBetweenKm(a, b) {
 }
 
 function findFarthestDriverWithinRadius(originCoords, radiusKm = 5) {
-  const candidates = simulatedDrivers
+  const fixedCandidates = simulatedDrivers
     .map((driver) => ({ ...driver, distanceKm: distanceBetweenKm(originCoords, driver.coords) }))
     .filter((driver) => driver.distanceKm <= radiusKm)
     .sort((a, b) => b.distanceKm - a.distanceKm);
-  return candidates[0] || null;
+  if (fixedCandidates[0]) return fixedCandidates[0];
+
+  if (!originCoords) return null;
+
+  const simulatedNearbyDrivers = [
+    { id: 'S1', name: 'Lucas Santos', kmNorth: 2.4, kmEast: 1.8 },
+    { id: 'S2', name: 'Marina Prado', kmNorth: -3.1, kmEast: 2.7 },
+    { id: 'S3', name: 'Ana Costa', kmNorth: 4.2, kmEast: -1.9 },
+  ].map((driver) => {
+    const latOffset = driver.kmNorth / 111;
+    const lngOffset = driver.kmEast / (111 * Math.cos((originCoords[0] * Math.PI) / 180));
+    const coords = [originCoords[0] + latOffset, originCoords[1] + lngOffset];
+    return { ...driver, coords, distanceKm: distanceBetweenKm(originCoords, coords) };
+  });
+
+  return simulatedNearbyDrivers
+    .filter((driver) => driver.distanceKm <= radiusKm)
+    .sort((a, b) => b.distanceKm - a.distanceKm)[0] || null;
 }
 
 function fallbackCoords(address, offset = 0) {
@@ -276,18 +293,22 @@ function App() {
   const [passengerStage, setPassengerStage] = useState('home');
   const [selectedRide, setSelectedRide] = useState(1);
   const [online, setOnline] = useState(true);
-  const [origin, setOrigin] = useState('Av. Paulista, 1578');
+  const [origin, setOrigin] = useState('Seu local');
   const [destination, setDestination] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [routePreview, setRoutePreview] = useState(null);
+  const [userLocationCoords, setUserLocationCoords] = useState(null);
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
   const [ride, setRide] = useState(initialRide);
   const activeRide = rideOptions[selectedRide];
   const isPassenger = mode === 'passenger';
   const estimate = useMemo(
-    () => estimateRouteWithDriver(origin, destination, activeRide, routePreview),
-    [origin, destination, activeRide, routePreview],
+    () => estimateRouteWithDriver(origin, destination, activeRide, {
+      ...routePreview,
+      originCoords: userLocationCoords || routePreview?.originCoords,
+    }),
+    [origin, destination, activeRide, routePreview, userLocationCoords],
   );
   const canRequestRide = estimate.isReady && estimate.hasDriver && paymentMethod;
 
@@ -319,6 +340,30 @@ function App() {
     return () => {
       client.disconnect();
     };
+  }, []);
+
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const coords = [position.coords.latitude, position.coords.longitude];
+        setUserLocationCoords(coords);
+        setOrigin((current) => current.trim() ? current : 'Seu local');
+        setRoutePreview((current) => ({
+          ...current,
+          originCoords: coords,
+        }));
+      },
+      () => {
+        setOrigin((current) => current.trim() ? current : 'Seu local');
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 120000,
+        timeout: 8000,
+      },
+    );
   }, []);
 
   useEffect(() => {
@@ -365,6 +410,14 @@ function App() {
     }
   }
 
+  function updateOrigin(nextOrigin) {
+    setOrigin(nextOrigin);
+    if (nextOrigin.trim().toLowerCase() !== 'seu local') {
+      setUserLocationCoords(null);
+      setRoutePreview((current) => current ? { ...current, originCoords: null } : current);
+    }
+  }
+
   function handleMainAction() {
     if (isPassenger) {
       if (ride.status === 'idle' || ride.status === 'cancelled' || ride.status === 'completed') {
@@ -382,7 +435,7 @@ function App() {
           ratePerKm: String(estimate.ratePerKm),
           assignedDriverName: estimate.driver?.name,
           assignedDriverDistanceKm: estimate.pickupDistanceKm,
-          originCoords: routePreview?.originCoords || fallbackCoords(origin, 0),
+          originCoords: userLocationCoords || routePreview?.originCoords || fallbackCoords(origin, 0),
           destinationCoords: routePreview?.destinationCoords || fallbackCoords(destination, 1),
         });
       }
@@ -476,11 +529,12 @@ function App() {
       routePreview={routePreview}
       selectedRide={selectedRide}
       setDestination={setDestination}
-      setOrigin={setOrigin}
+      setOrigin={updateOrigin}
       setPassengerStage={setPassengerStage}
       setPaymentMethod={setPaymentMethod}
       setRoutePreview={setRoutePreview}
       setSelectedRide={setSelectedRide}
+      userLocationCoords={userLocationCoords}
     />
   );
 
@@ -721,9 +775,11 @@ function PassengerAppExperience({
   setPaymentMethod,
   setRoutePreview,
   setSelectedRide,
+  userLocationCoords,
 }) {
   const rideActive = !['idle', 'completed', 'cancelled'].includes(ride.status);
   const stage = rideActive ? 'requested' : passengerStage;
+  const rideWithUserOrigin = userLocationCoords ? { ...ride, originCoords: userLocationCoords } : ride;
 
   if (stage === 'plan') {
     return (
@@ -742,7 +798,7 @@ function PassengerAppExperience({
           <div className="plan-card">
             <label>
               <span>Origem</span>
-              <input value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="Casa" />
+              <input value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="Seu local" />
             </label>
             <label>
               <span>Destino</span>
@@ -782,7 +838,7 @@ function PassengerAppExperience({
       <main className="passenger-dark-page">
         <section className="passenger-screen">
           <div className="passenger-map-large">
-            <RouteMap origin={origin} destination={destination} ride={ride} onRouteReady={setRoutePreview} />
+            <RouteMap origin={origin} destination={destination} ride={rideWithUserOrigin} onRouteReady={setRoutePreview} />
             <button className="map-back" onClick={() => setPassengerStage('plan')}><ChevronRight size={22} /></button>
             <div className="route-title">{origin.split(',')[0] || 'Origem'} <span>›</span> {destination || 'Destino'}</div>
           </div>
@@ -792,7 +848,10 @@ function PassengerAppExperience({
             <h1>Escolher uma viagem</h1>
             <div className="ride-choice-list">
               {rideOptions.map((rideOption, index) => {
-                const optionEstimate = estimateRouteWithDriver(origin, destination, rideOption, routePreview);
+                const optionEstimate = estimateRouteWithDriver(origin, destination, rideOption, {
+                  ...routePreview,
+                  originCoords: userLocationCoords || routePreview?.originCoords,
+                });
                 return (
                   <button
                     className={selectedRide === index ? 'choice-row selected' : 'choice-row'}
