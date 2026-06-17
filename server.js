@@ -32,6 +32,8 @@ const initialRide = {
   ratePerKm: null,
   assignedDriverName: null,
   assignedDriverDistanceKm: null,
+  fareReferenceDriverName: null,
+  fareReferenceDriverDistanceKm: null,
   originCoords: null,
   destinationCoords: null,
   passenger: 'Passageiro SIGA',
@@ -80,8 +82,10 @@ function applyRideEvent(event, payload = {}) {
       pickupDistanceKm: payload.pickupDistanceKm || '5.0',
       billableKm: payload.billableKm || payload.distanceKm || '8.2',
       ratePerKm: payload.ratePerKm || '3.10',
-      assignedDriverName: payload.assignedDriverName || 'Marina Prado',
-      assignedDriverDistanceKm: payload.assignedDriverDistanceKm || payload.pickupDistanceKm || '5.0',
+      assignedDriverName: null,
+      assignedDriverDistanceKm: null,
+      fareReferenceDriverName: payload.fareReferenceDriverName || payload.assignedDriverName || null,
+      fareReferenceDriverDistanceKm: payload.fareReferenceDriverDistanceKm || payload.assignedDriverDistanceKm || payload.pickupDistanceKm || '5.0',
       originCoords: payload.originCoords || null,
       destinationCoords: payload.destinationCoords || null,
       driver: null,
@@ -91,9 +95,12 @@ function applyRideEvent(event, payload = {}) {
   }
 
   if (event === 'ride:accept' && ride.status === 'requested') {
+    const driverName = payload.driverName || payload.name || 'Motorista SIGA';
     updateRide({
       status: 'accepted',
-      driver: ride.assignedDriverName || 'Marina Prado',
+      assignedDriverName: driverName,
+      assignedDriverDistanceKm: payload.driverDistanceKm || null,
+      driver: driverName,
       vehicle: 'Honda City vermelho - SIGA-2048',
     });
     return true;
@@ -154,8 +161,8 @@ io.on('connection', (socket) => {
     applyRideEvent('ride:request', payload);
   });
 
-  socket.on('ride:accept', () => {
-    applyRideEvent('ride:accept');
+  socket.on('ride:accept', (payload = {}) => {
+    applyRideEvent('ride:accept', payload);
   });
 
   socket.on('ride:arrive', () => {

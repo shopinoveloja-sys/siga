@@ -26,9 +26,9 @@ import {
 import './styles.css';
 
 const rideOptions = [
-  { name: 'SIGA Pop', time: '4 min', ratePerKm: 2.4, note: 'economico' },
-  { name: 'SIGA Comfort', time: '2 min', ratePerKm: 3.1, note: 'recomendado' },
-  { name: 'SIGA Black', time: '6 min', ratePerKm: 4.6, note: 'premium' },
+  { name: 'SIGA Pop', time: '4 min', ratePerKm: 3, note: 'economico' },
+  { name: 'SIGA Comfort', time: '2 min', ratePerKm: 4, note: 'recomendado' },
+  { name: 'SIGA Black', time: '6 min', ratePerKm: 5, note: 'premium' },
 ];
 
 const paymentOptions = ['Pix', 'Cartao de credito', 'Carteira SIGA', 'Dinheiro'];
@@ -61,6 +61,10 @@ const initialRide = {
   pickupDistanceKm: null,
   billableKm: null,
   ratePerKm: null,
+  assignedDriverName: null,
+  assignedDriverDistanceKm: null,
+  fareReferenceDriverName: null,
+  fareReferenceDriverDistanceKm: null,
   originCoords: null,
   destinationCoords: null,
   driver: null,
@@ -72,6 +76,8 @@ const fallbackLocations = [
   { key: 'augusta', coords: [-23.5539, -46.6538] },
   { key: 'congonhas', coords: [-23.6261, -46.6566] },
   { key: 'morumbi', coords: [-23.6229, -46.6997] },
+  { key: 'mestre alvaro', coords: [-20.2128, -40.2724] },
+  { key: 'shopping mestre', coords: [-20.2128, -40.2724] },
   { key: 'pinheiros', coords: [-23.5674, -46.7019] },
   { key: 'vila olimpia', coords: [-23.5953, -46.6858] },
   { key: 'itaim', coords: [-23.5849, -46.6778] },
@@ -493,8 +499,8 @@ function App() {
           pickupDistanceKm: estimate.pickupDistanceKm,
           billableKm: estimate.billableKm,
           ratePerKm: String(estimate.ratePerKm),
-          assignedDriverName: estimate.driver?.name,
-          assignedDriverDistanceKm: estimate.pickupDistanceKm,
+          fareReferenceDriverName: estimate.driver?.name,
+          fareReferenceDriverDistanceKm: estimate.pickupDistanceKm,
           originCoords: userLocationCoords || routePreview?.originCoords || fallbackCoords(origin, 0),
           destinationCoords: routePreview?.destinationCoords || fallbackCoords(destination, 1),
         });
@@ -516,6 +522,16 @@ function App() {
       cancelled: 'ride:reset',
     };
     const event = eventByStatus[ride.status];
+    if (event === 'ride:accept') {
+      const acceptingDriver = driverLocations[0];
+      emitRide(event, {
+        driverName: acceptingDriver?.name || 'Motorista SIGA',
+        driverDistanceKm: acceptingDriver?.coords && ride.originCoords
+          ? distanceBetweenKm(ride.originCoords, acceptingDriver.coords).toFixed(1)
+          : null,
+      });
+      return;
+    }
     if (event) emitRide(event);
   }
 
