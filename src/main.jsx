@@ -153,27 +153,11 @@ function distanceBetweenKm(a, b) {
   return 2 * earthRadius * Math.asin(Math.sqrt(h));
 }
 
-function findFarthestDriverWithinRadius(originCoords, radiusKm = 5) {
-  const fixedCandidates = simulatedDrivers
+function findFarthestDriverWithinRadius(originCoords, availableDrivers = [], radiusKm = 5) {
+  if (!originCoords || !availableDrivers.length) return null;
+
+  return availableDrivers
     .map((driver) => ({ ...driver, distanceKm: distanceBetweenKm(originCoords, driver.coords) }))
-    .filter((driver) => driver.distanceKm <= radiusKm)
-    .sort((a, b) => b.distanceKm - a.distanceKm);
-  if (fixedCandidates[0]) return fixedCandidates[0];
-
-  if (!originCoords) return null;
-
-  const simulatedNearbyDrivers = [
-    { id: 'S1', name: 'Lucas Santos', kmNorth: 2.4, kmEast: 1.8 },
-    { id: 'S2', name: 'Marina Prado', kmNorth: -3.1, kmEast: 2.7 },
-    { id: 'S3', name: 'Ana Costa', kmNorth: 4.2, kmEast: -1.9 },
-  ].map((driver) => {
-    const latOffset = driver.kmNorth / 111;
-    const lngOffset = driver.kmEast / (111 * Math.cos((originCoords[0] * Math.PI) / 180));
-    const coords = [originCoords[0] + latOffset, originCoords[1] + lngOffset];
-    return { ...driver, coords, distanceKm: distanceBetweenKm(originCoords, coords) };
-  });
-
-  return simulatedNearbyDrivers
     .filter((driver) => driver.distanceKm <= radiusKm)
     .sort((a, b) => b.distanceKm - a.distanceKm)[0] || null;
 }
@@ -239,7 +223,7 @@ function estimateRoute(origin, destination, ride) {
   };
 }
 
-function estimateRouteWithDriver(origin, destination, ride, routePreview) {
+function estimateRouteWithDriver(origin, destination, ride, routePreview, availableDrivers = [], searchExpired = false) {
   const base = estimateRoute(origin, destination, ride);
   const routeDistanceKm = Number(routePreview?.routeDistanceKm);
   const routeDurationMin = Number(routePreview?.routeDurationMin);
@@ -252,7 +236,7 @@ function estimateRouteWithDriver(origin, destination, ride, routePreview) {
       }
     : base;
   const originCoords = routePreview?.originCoords || fallbackCoords(origin, 0);
-  const selectedDriver = routeBase.isReady ? findFarthestDriverWithinRadius(originCoords, 5) : null;
+  const selectedDriver = routeBase.isReady ? findFarthestDriverWithinRadius(originCoords, availableDrivers, 5) : null;
 
   if (!routeBase.isReady) {
     return { ...routeBase, hasDriver: false, driver: null, price: 'Informe rota' };
@@ -266,7 +250,7 @@ function estimateRouteWithDriver(origin, destination, ride, routePreview) {
       pickupDistanceKm: 0,
       billableKm: Number(routeBase.distanceKm).toFixed(1),
       priceNumber: 0,
-      price: 'Indisponivel',
+      price: searchExpired ? 'Indisponivel' : 'Procurando',
     };
   }
 
@@ -298,17 +282,25 @@ function App() {
   const [paymentMethod, setPaymentMethod] = useState('');
   const [routePreview, setRoutePreview] = useState(null);
   const [userLocationCoords, setUserLocationCoords] = useState(null);
+  const [driverLocations, setDriverLocations] = useState([]);
+  const [driverLocationStatus, setDriverLocationStatus] = useState('idle');
+  const [driverSearchStartedAt, setDriverSearchStartedAt] = useState(null);
+  const [now, setNow] = useState(Date.now());
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
   const [ride, setRide] = useState(initialRide);
   const activeRide = rideOptions[selectedRide];
   const isPassenger = mode === 'passenger';
+  const driverSearchExpired = Boolean(driverSearchStartedAt && now - driverSearchStartedAt >= 120000);
+  const driverSearchRemainingSeconds = driverSearchStartedAt
+    ? Math.max(0, Math.ceil((120000 - (now - driverSearchStartedAt)) / 1000))
+    : 120;
   const estimate = useMemo(
     () => estimateRouteWithDriver(origin, destination, activeRide, {
       ...routePreview,
       originCoords: userLocationCoords || routePreview?.originCoords,
-    }),
-    [origin, destination, activeRide, routePreview, userLocationCoords],
+    }, driverLocations, driverSearchExpired),
+    [origin, destination, activeRide, routePreview, userLocationCoords, driverLocations, driverSearchExpired],
   );
   const canRequestRide = estimate.isReady && estimate.hasDriver && paymentMethod;
 
@@ -336,6 +328,7 @@ function App() {
     client.on('connect', () => setConnected(true));
     client.on('disconnect', () => setConnected(false));
     client.on('ride:update', setRide);
+    client.on('drivers:update', setDriverLocations);
 
     return () => {
       client.disconnect();
@@ -343,6 +336,12 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (!entered || !isPassenger) return;
     if (!navigator.geolocation) return;
 
     navigator.geolocation.getCurrentPosition(
@@ -364,17 +363,25 @@ function App() {
         timeout: 8000,
       },
     );
-  }, []);
+  }, [entered, isPassenger]);
 
   useEffect(() => {
     let alive = true;
 
     async function syncRide() {
       try {
-        const response = await fetch('/api/ride', { cache: 'no-store' });
-        if (!response.ok) return;
-        const nextRide = await response.json();
-        if (alive) setRide(nextRide);
+        const [rideResponse, driversResponse] = await Promise.all([
+          fetch('/api/ride', { cache: 'no-store' }),
+          fetch('/api/drivers', { cache: 'no-store' }),
+        ]);
+        if (rideResponse.ok) {
+          const nextRide = await rideResponse.json();
+          if (alive) setRide(nextRide);
+        }
+        if (driversResponse.ok) {
+          const nextDrivers = await driversResponse.json();
+          if (alive) setDriverLocations(nextDrivers);
+        }
       } catch {
         // Socket.IO remains the primary realtime channel; polling is only a fallback.
       }
@@ -387,6 +394,59 @@ function App() {
       window.clearInterval(interval);
     };
   }, []);
+
+  useEffect(() => {
+    if (!entered || isPassenger || !online) return undefined;
+
+    if (!navigator.geolocation) {
+      setDriverLocationStatus('unsupported');
+      return undefined;
+    }
+
+    setDriverLocationStatus('requesting');
+
+    const publishLocation = async (position) => {
+      const coords = [position.coords.latitude, position.coords.longitude];
+      setDriverLocationStatus('active');
+      const payload = {
+        id: 'driver-live',
+        name: 'Motorista SIGA',
+        coords,
+        online,
+      };
+      socket?.emit('driver:location', payload);
+      try {
+        await fetch('/api/driver/location', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        // Socket update is enough when HTTP fallback is unavailable.
+      }
+    };
+
+    const watchId = navigator.geolocation.watchPosition(
+      publishLocation,
+      () => setDriverLocationStatus('denied'),
+      {
+        enableHighAccuracy: true,
+        maximumAge: 30000,
+        timeout: 12000,
+      },
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [entered, isPassenger, online, socket]);
+
+  useEffect(() => {
+    if (!isPassenger || !destination.trim() || !estimate.isReady || estimate.hasDriver) {
+      setDriverSearchStartedAt(null);
+      return;
+    }
+
+    setDriverSearchStartedAt((current) => current || Date.now());
+  }, [destination, estimate.hasDriver, estimate.isReady, isPassenger, origin, routePreview?.originCoords]);
 
   async function emitRide(event, payload) {
     try {
@@ -505,6 +565,8 @@ function App() {
         ride={ride}
         online={online}
         setOnline={setOnline}
+        driverLocationStatus={driverLocationStatus}
+        driverLocations={driverLocations}
         connected={connected}
         cta={cta}
         onMainAction={handleMainAction}
@@ -519,6 +581,9 @@ function App() {
       canRequestRide={canRequestRide}
       connected={connected}
       destination={destination}
+      driverLocations={driverLocations}
+      driverSearchExpired={driverSearchExpired}
+      driverSearchRemainingSeconds={driverSearchRemainingSeconds}
       emitRide={emitRide}
       estimate={estimate}
       onMainAction={handleMainAction}
@@ -761,6 +826,9 @@ function PassengerAppExperience({
   canRequestRide,
   connected,
   destination,
+  driverLocations,
+  driverSearchExpired,
+  driverSearchRemainingSeconds,
   estimate,
   onMainAction,
   origin,
@@ -851,7 +919,7 @@ function PassengerAppExperience({
                 const optionEstimate = estimateRouteWithDriver(origin, destination, rideOption, {
                   ...routePreview,
                   originCoords: userLocationCoords || routePreview?.originCoords,
-                });
+                }, driverLocations, driverSearchExpired);
                 return (
                   <button
                     className={selectedRide === index ? 'choice-row selected' : 'choice-row'}
@@ -883,12 +951,22 @@ function PassengerAppExperience({
                   {estimate.distanceKm} km percurso + {estimate.pickupDistanceKm} km motorista = {estimate.billableKm} km cobrados
                 </div>
               ) : (
-                <div className="passenger-unavailable">Nenhum motorista disponivel em ate 5 km da origem.</div>
+                <div className="passenger-unavailable">
+                  {driverSearchExpired
+                    ? 'Nenhum motorista disponivel em ate 5 km da origem.'
+                    : `Procurando motorista proximo de voce... ${driverSearchRemainingSeconds}s`}
+                </div>
               )
             )}
 
             <button className="choose-ride-button" onClick={onMainAction} disabled={!canRequestRide}>
-              {canRequestRide ? `Escolher ${activeRide.name}` : 'Complete a viagem'}
+              {canRequestRide
+                ? `Escolher ${activeRide.name}`
+                : !estimate.isReady || (estimate.hasDriver && !paymentMethod)
+                  ? 'Complete a viagem'
+                  : driverSearchExpired
+                  ? 'Indisponivel agora'
+                  : 'Procurando motorista'}
             </button>
           </section>
         </section>
@@ -1025,14 +1103,31 @@ function DriverView({ online, setOnline, ride, connected, emitRide }) {
   );
 }
 
-function DriverMapExperience({ ride, online, setOnline, connected, cta, onMainAction, emitRide }) {
+function DriverMapExperience({
+  ride,
+  online,
+  setOnline,
+  connected,
+  cta,
+  onMainAction,
+  emitRide,
+  driverLocations,
+  driverLocationStatus,
+}) {
   const hasRequest = ride.status !== 'idle';
   const nextTrip = hasRequest ? `${ride.price || 'R$ 0,00'}` : '+R$ 5,50';
+  const locationLabel = {
+    active: 'Localizacao ativa',
+    denied: 'Localizacao negada',
+    requesting: 'Permita localizacao para receber corridas',
+    unsupported: 'GPS indisponivel neste aparelho',
+    idle: 'Aguardando GPS',
+  }[driverLocationStatus] || 'Aguardando GPS';
 
   return (
     <main className="driver-map-page">
       <section className="driver-map-screen" aria-label="Mapa do motorista SIGA">
-        <DriverDemandMap ride={ride} />
+        <DriverDemandMap ride={ride} driverLocations={driverLocations} />
 
         <div className="driver-map-top">
           <button className="driver-floating-button" aria-label="Inicio"><Home size={22} /></button>
@@ -1056,7 +1151,7 @@ function DriverMapExperience({ ride, online, setOnline, connected, cta, onMainAc
           <button className="driver-bar-icon" aria-label="Filtros"><Menu size={22} /></button>
           <div>
             <strong>{hasRequest ? `${rideLabels[ride.status]}: ${nextTrip}` : `Proxima viagem: ${nextTrip}`}</strong>
-            <small>{connected ? (online ? 'Voce esta online' : 'Voce esta offline') : 'Conectando simulacao'}</small>
+            <small>{connected ? (online ? `${locationLabel} - voce esta online` : 'Voce esta offline') : 'Conectando simulacao'}</small>
           </div>
           <button className="driver-bar-icon" onClick={() => setOnline(!online)} aria-label="Alternar status">
             <RadioTower size={22} />
@@ -1073,7 +1168,7 @@ function DriverMapExperience({ ride, online, setOnline, connected, cta, onMainAc
   );
 }
 
-function DriverDemandMap({ ride }) {
+function DriverDemandMap({ ride, driverLocations = [] }) {
   const mapNodeRef = useRef(null);
   const mapRef = useRef(null);
   const directionsRef = useRef(null);
@@ -1085,9 +1180,8 @@ function DriverDemandMap({ ride }) {
     const hasTrip = ride.status !== 'idle';
     const originCoords = ride.originCoords || fallbackCoords(ride.origin || initialRide.origin, 0);
     const destinationCoords = ride.destinationCoords || fallbackCoords(ride.destination || initialRide.destination, 1);
-    const driverCoords = ride.assignedDriverName
-      ? simulatedDrivers.find((driver) => driver.name === ride.assignedDriverName)?.coords || simulatedDrivers[0].coords
-      : simulatedDrivers[0].coords;
+    const liveDriver = driverLocations.find((driver) => driver.name === ride.assignedDriverName) || driverLocations[0];
+    const driverCoords = liveDriver?.coords || simulatedDrivers[0].coords;
 
     async function drawDriverMap() {
       if (!mapNodeRef.current) return;
@@ -1151,7 +1245,7 @@ function DriverDemandMap({ ride }) {
           markersRef.current.push(marker);
         };
 
-        makeMarker(driverLatLng, 'M', ride.assignedDriverName || 'Motorista SIGA', '#111111');
+        makeMarker(driverLatLng, 'M', liveDriver?.name || ride.assignedDriverName || 'Motorista SIGA', '#111111');
 
         if (!hasTrip) {
           directionsRef.current.set('directions', null);
@@ -1205,6 +1299,7 @@ function DriverDemandMap({ ride }) {
     ride.originCoords,
     ride.destinationCoords,
     ride.assignedDriverName,
+    driverLocations,
   ]);
 
   return (

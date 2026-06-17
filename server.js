@@ -41,9 +41,19 @@ const initialRide = {
 };
 
 let ride = { ...initialRide };
+let drivers = {};
+
+function getActiveDrivers() {
+  const now = Date.now();
+  return Object.values(drivers).filter((driver) => now - driver.updatedAt <= 120000 && driver.online !== false);
+}
 
 function publish() {
   io.emit('ride:update', ride);
+}
+
+function publishDrivers() {
+  io.emit('drivers:update', getActiveDrivers());
 }
 
 function updateRide(next) {
@@ -118,8 +128,27 @@ function applyRideEvent(event, payload = {}) {
   return false;
 }
 
+function updateDriverLocation(payload = {}) {
+  const coords = Array.isArray(payload.coords) ? payload.coords.map(Number) : null;
+  if (!coords || coords.length !== 2 || coords.some((value) => Number.isNaN(value))) {
+    return false;
+  }
+
+  const id = payload.id || 'driver-live';
+  drivers[id] = {
+    id,
+    name: payload.name || 'Motorista SIGA',
+    coords,
+    online: payload.online !== false,
+    updatedAt: Date.now(),
+  };
+  publishDrivers();
+  return true;
+}
+
 io.on('connection', (socket) => {
   socket.emit('ride:update', ride);
+  socket.emit('drivers:update', getActiveDrivers());
 
   socket.on('ride:request', (payload = {}) => {
     applyRideEvent('ride:request', payload);
@@ -148,6 +177,10 @@ io.on('connection', (socket) => {
   socket.on('ride:reset', () => {
     applyRideEvent('ride:reset');
   });
+
+  socket.on('driver:location', (payload = {}) => {
+    updateDriverLocation(payload);
+  });
 });
 
 app.get('/health', (_req, res) => {
@@ -162,6 +195,15 @@ app.get('/api/config', (_req, res) => {
 
 app.get('/api/ride', (_req, res) => {
   res.json(ride);
+});
+
+app.get('/api/drivers', (_req, res) => {
+  res.json(getActiveDrivers());
+});
+
+app.post('/api/driver/location', (req, res) => {
+  const applied = updateDriverLocation(req.body || {});
+  res.status(applied ? 200 : 422).json({ applied, drivers: getActiveDrivers() });
 });
 
 app.post('/api/ride/reset', (_req, res) => {
