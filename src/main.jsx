@@ -176,6 +176,16 @@ function fallbackCoords(address, offset = 0) {
   return [-23.5614 + offset * 0.035, -46.6559 - offset * 0.04];
 }
 
+function normalizeSearchAddress(address) {
+  const query = address?.trim() || '';
+  const normalized = query.toLowerCase();
+  if (normalized.includes('mestre alvaro') || normalized.includes('shopping mestre')) {
+    return 'Shopping Mestre Alvaro, Av. Joao Palacio, 300, Eurico Salles, Serra, ES, Brasil';
+  }
+  if (normalized === 'seu local') return query;
+  return `${query}, Brasil`;
+}
+
 async function geocodeAddress(address, offset) {
   const query = address.trim();
   if (!query) return null;
@@ -241,12 +251,21 @@ function estimateRouteWithDriver(origin, destination, ride, routePreview, availa
         distanceKm: routeDistanceKm.toFixed(1),
         durationMin: Math.max(1, Math.round(routeDurationMin || routeDistanceKm * 2.4 + 6)),
       }
-    : base;
+    : {
+        ...base,
+        isReady: false,
+        distanceKm: 0,
+        durationMin: 0,
+        pickupDistanceKm: 0,
+        billableKm: 0,
+        priceNumber: 0,
+        price: 'Calculando rota',
+      };
   const originCoords = routePreview?.originCoords || fallbackCoords(origin, 0);
   const selectedDriver = routeBase.isReady ? findFarthestDriverWithinRadius(originCoords, availableDrivers, 5) : null;
 
   if (!routeBase.isReady) {
-    return { ...routeBase, hasDriver: false, driver: null, price: 'Informe rota' };
+    return { ...routeBase, hasDriver: false, driver: null, price: destination.trim() ? 'Calculando rota' : 'Informe rota' };
   }
 
   if (!selectedDriver) {
@@ -1516,7 +1535,7 @@ function RouteMap({ origin, destination, ride, onRouteReady, driverLocations = [
 
           geocoder.geocode(
             {
-              address: `${address}, Brasil`,
+              address: normalizeSearchAddress(address),
               componentRestrictions: { country: 'BR' },
             },
             (results, status) => {
