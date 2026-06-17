@@ -561,6 +561,29 @@ function App() {
     }));
   }
 
+  function selectOriginPlace(label, coords) {
+    setOrigin(label);
+    setUserLocationCoords(null);
+    setRoutePreview((current) => ({
+      ...(current || {}),
+      originCoords: coords,
+      routeDistanceKm: null,
+      routeDurationMin: null,
+      routeStatus: destination.trim() ? 'loading' : 'idle',
+    }));
+  }
+
+  function selectDestinationPlace(label, coords) {
+    setDestination(label);
+    setRoutePreview((current) => ({
+      ...(current || {}),
+      destinationCoords: coords,
+      routeDistanceKm: null,
+      routeDurationMin: null,
+      routeStatus: label.trim() ? 'loading' : 'idle',
+    }));
+  }
+
   function handleMainAction() {
     if (isPassenger) {
       if (ride.status === 'idle' || ride.status === 'cancelled' || ride.status === 'completed') {
@@ -695,6 +718,8 @@ function App() {
       selectedRide={selectedRide}
       setDestination={updateDestination}
       setOrigin={updateOrigin}
+      setOriginPlace={selectOriginPlace}
+      setDestinationPlace={selectDestinationPlace}
       setPassengerStage={setPassengerStage}
       setPaymentMethod={setPaymentMethod}
       setRoutePreview={setRoutePreview}
@@ -916,10 +941,71 @@ function PassengerView({
 const recentDestinations = [
   { name: 'Imperio dos Moveis', address: 'Avenida Desembargador Mario da Silva Nunes', km: '7.6 km' },
   { name: 'Rua Professora Elza Lemos Andreatta', address: 'Morada de Camburi, Vitoria - ES', km: '780 m' },
-  { name: 'Shopping Mestre Alvaro', address: 'Av. Joao Palacio, 300 - Eurico Salles', km: '4.3 km' },
+  { name: 'Shopping Mestre Alvaro', address: 'Av. Joao Palacio, 300 - Eurico Salles', km: '4.3 km', coords: [-20.2128, -40.2724] },
   { name: 'Aeroporto de Congonhas', address: 'Av. Washington Luis, Sao Paulo', km: '8.1 km' },
   { name: 'Academia Triton', address: 'Rua Arquimedes Thevenard, Jardim Camburi', km: '4.2 km' },
 ];
+
+function PlaceInput({ value, onChange, onPlaceSelect, placeholder }) {
+  const inputRef = useRef(null);
+  const autocompleteRef = useRef(null);
+  const placeSelectRef = useRef(onPlaceSelect);
+
+  useEffect(() => {
+    placeSelectRef.current = onPlaceSelect;
+  }, [onPlaceSelect]);
+
+  useEffect(() => {
+    let listener = null;
+    let cancelled = false;
+
+    async function setupAutocomplete() {
+      if (!inputRef.current || autocompleteRef.current) return;
+
+      try {
+        const maps = await loadGoogleMaps();
+        if (cancelled || !inputRef.current || !maps.places?.Autocomplete) return;
+
+        const bounds = new maps.LatLngBounds(
+          { lat: -20.42, lng: -40.43 },
+          { lat: -20.12, lng: -40.16 },
+        );
+        autocompleteRef.current = new maps.places.Autocomplete(inputRef.current, {
+          bounds,
+          componentRestrictions: { country: 'br' },
+          fields: ['formatted_address', 'geometry', 'name'],
+        });
+
+        listener = autocompleteRef.current.addListener('place_changed', () => {
+          const place = autocompleteRef.current.getPlace();
+          const location = place?.geometry?.location;
+          if (!location) return;
+
+          const label = place.formatted_address || place.name || inputRef.current.value;
+          placeSelectRef.current(label, [location.lat(), location.lng()]);
+        });
+      } catch {
+        // Plain typing still works if Google Places is unavailable.
+      }
+    }
+
+    setupAutocomplete();
+
+    return () => {
+      cancelled = true;
+      if (listener) listener.remove();
+    };
+  }, []);
+
+  return (
+    <input
+      ref={inputRef}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+    />
+  );
+}
 
 function PassengerAppExperience({
   activeRide,
@@ -939,7 +1025,9 @@ function PassengerAppExperience({
   routePreview,
   selectedRide,
   setDestination,
+  setDestinationPlace,
   setOrigin,
+  setOriginPlace,
   setPassengerStage,
   setPaymentMethod,
   setRoutePreview,
@@ -949,6 +1037,11 @@ function PassengerAppExperience({
   const rideActive = !['idle', 'completed', 'cancelled'].includes(ride.status);
   const stage = rideActive ? 'requested' : passengerStage;
   const rideWithUserOrigin = userLocationCoords ? { ...ride, originCoords: userLocationCoords } : ride;
+  const planningRide = {
+    ...rideWithUserOrigin,
+    originCoords: userLocationCoords || routePreview?.originCoords || rideWithUserOrigin.originCoords,
+    destinationCoords: routePreview?.destinationCoords || rideWithUserOrigin.destinationCoords,
+  };
 
   if (stage === 'plan') {
     return (
@@ -967,11 +1060,21 @@ function PassengerAppExperience({
           <div className="plan-card">
             <label>
               <span>Origem</span>
-              <input value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="Seu local" />
+              <PlaceInput
+                value={origin}
+                onChange={setOrigin}
+                onPlaceSelect={setOriginPlace}
+                placeholder="Seu local"
+              />
             </label>
             <label>
               <span>Destino</span>
-              <input value={destination} onChange={(event) => setDestination(event.target.value)} placeholder="Para onde?" />
+              <PlaceInput
+                value={destination}
+                onChange={setDestination}
+                onPlaceSelect={setDestinationPlace}
+                placeholder="Para onde?"
+              />
             </label>
           </div>
 
@@ -980,7 +1083,11 @@ function PassengerAppExperience({
               <button
                 key={item.name}
                 onClick={() => {
-                  setDestination(item.name);
+                  if (item.coords) {
+                    setDestinationPlace(item.name, item.coords);
+                  } else {
+                    setDestination(item.name);
+                  }
                   setPassengerStage('choose');
                 }}
               >
@@ -1007,7 +1114,7 @@ function PassengerAppExperience({
       <main className="passenger-dark-page">
         <section className="passenger-screen">
           <div className="passenger-map-large">
-            <RouteMap origin={origin} destination={destination} ride={rideWithUserOrigin} onRouteReady={setRoutePreview} />
+            <RouteMap origin={origin} destination={destination} ride={planningRide} onRouteReady={setRoutePreview} />
             <button className="map-back" onClick={() => setPassengerStage('plan')}><ChevronRight size={22} /></button>
             <div className="route-title">{origin.split(',')[0] || 'Origem'} <span>›</span> {destination || 'Destino'}</div>
           </div>
