@@ -1667,6 +1667,12 @@ button {
   cursor: pointer;
 }
 
+.ride-actions button.secondary {
+  color: var(--red-dark);
+  background: #fff0f3;
+  border: 1px solid rgba(229, 9, 45, 0.22);
+}
+
 .safety-card {
   display: flex;
   gap: 12px;

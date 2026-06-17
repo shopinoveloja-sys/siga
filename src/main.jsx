@@ -244,10 +244,12 @@ function estimateRouteWithDriver(origin, destination, ride, routePreview, availa
   const base = estimateRoute(origin, destination, ride);
   const routeDistanceKm = Number(routePreview?.routeDistanceKm);
   const routeDurationMin = Number(routePreview?.routeDurationMin);
+  const routeFailed = routePreview?.routeStatus === 'failed';
   const routeBase = routeDistanceKm > 0
     ? {
         ...base,
         isReady: true,
+        routeStatus: 'ready',
         distanceKm: routeDistanceKm.toFixed(1),
         durationMin: Math.max(1, Math.round(routeDurationMin || routeDistanceKm * 2.4 + 6)),
       }
@@ -259,13 +261,21 @@ function estimateRouteWithDriver(origin, destination, ride, routePreview, availa
         pickupDistanceKm: 0,
         billableKm: 0,
         priceNumber: 0,
-        price: 'Calculando rota',
+        routeStatus: routeFailed ? 'failed' : 'loading',
+        price: routeFailed ? 'Rota indisponivel' : 'Calculando rota',
       };
   const originCoords = routePreview?.originCoords || fallbackCoords(origin, 0);
   const selectedDriver = routeBase.isReady ? findFarthestDriverWithinRadius(originCoords, availableDrivers, 5) : null;
 
   if (!routeBase.isReady) {
-    return { ...routeBase, hasDriver: false, driver: null, price: destination.trim() ? 'Calculando rota' : 'Informe rota' };
+    return {
+      ...routeBase,
+      hasDriver: false,
+      driver: null,
+      price: destination.trim()
+        ? routeFailed ? 'Rota indisponivel' : 'Calculando rota'
+        : 'Informe rota',
+    };
   }
 
   if (!selectedDriver) {
@@ -530,8 +540,25 @@ function App() {
     setOrigin(nextOrigin);
     if (nextOrigin.trim().toLowerCase() !== 'seu local') {
       setUserLocationCoords(null);
-      setRoutePreview((current) => current ? { ...current, originCoords: null } : current);
+      setRoutePreview((current) => ({
+        ...(current || {}),
+        originCoords: null,
+        routeDistanceKm: null,
+        routeDurationMin: null,
+        routeStatus: destination.trim() ? 'loading' : 'idle',
+      }));
     }
+  }
+
+  function updateDestination(nextDestination) {
+    setDestination(nextDestination);
+    setRoutePreview((current) => ({
+      ...(current || {}),
+      destinationCoords: null,
+      routeDistanceKm: null,
+      routeDurationMin: null,
+      routeStatus: nextDestination.trim() ? 'loading' : 'idle',
+    }));
   }
 
   function handleMainAction() {
@@ -666,7 +693,7 @@ function App() {
       ride={ride}
       routePreview={routePreview}
       selectedRide={selectedRide}
-      setDestination={setDestination}
+      setDestination={updateDestination}
       setOrigin={updateOrigin}
       setPassengerStage={setPassengerStage}
       setPaymentMethod={setPaymentMethod}
@@ -1031,6 +1058,13 @@ function PassengerAppExperience({
                     : `Procurando motorista proximo de voce... ${driverSearchRemainingSeconds}s`}
                 </div>
               )
+            )}
+            {!estimate.isReady && destination.trim() && (
+              <div className={estimate.routeStatus === 'failed' ? 'passenger-unavailable' : 'passenger-price-rule'}>
+                {estimate.routeStatus === 'failed'
+                  ? 'Nao foi possivel calcular a rota real agora. Confira a origem, o destino e tente novamente.'
+                  : 'Calculando rota real pelo Google Maps...'}
+              </div>
             )}
 
             <button className="choose-ride-button" onClick={onMainAction} disabled={!canRequestRide}>
@@ -1421,6 +1455,7 @@ function RealtimeBanner({ connected, ride }) {
 
 function RideStatusCard({ ride, emitRide, role }) {
   const canPassengerCancel = role === 'passenger' && ['requested', 'accepted', 'arrived'].includes(ride.status);
+  const canDriverReject = role === 'driver' && ride.status === 'requested';
   const canReset = ['completed', 'cancelled'].includes(ride.status);
 
   return (
@@ -1475,6 +1510,7 @@ function RideStatusCard({ ride, emitRide, role }) {
 
       <div className="ride-actions">
         {canPassengerCancel && <button onClick={() => emitRide('ride:cancel')}>Cancelar pedido</button>}
+        {canDriverReject && <button className="secondary" onClick={() => emitRide('ride:cancel')}>Recusar corrida</button>}
         {canReset && <button onClick={() => emitRide('ride:reset')}>Nova simulacao</button>}
       </div>
     </article>
@@ -1516,7 +1552,7 @@ function RouteMap({ origin, destination, ride, onRouteReady, driverLocations = [
         || driverLocations.find((driver) => driver.name === ride.assignedDriverName)
       : null;
 
-    onRouteReady?.({ originCoords: activeOrigin, destinationCoords: activeDestination });
+    onRouteReady?.({ originCoords: activeOrigin, destinationCoords: activeDestination, routeStatus: destination?.trim() ? 'loading' : 'idle' });
 
     async function drawMap() {
       if (!mapNodeRef.current) return;
@@ -1646,16 +1682,33 @@ function RouteMap({ origin, destination, ride, onRouteReady, driverLocations = [
                 destinationCoords: [destinationLatLng.lat, destinationLatLng.lng],
                 routeDistanceKm: leg?.distance?.value ? leg.distance.value / 1000 : null,
                 routeDurationMin: leg?.duration?.value ? leg.duration.value / 60 : null,
+                routeStatus: 'ready',
               });
               setMapState('ready');
               return;
             }
 
+            onRouteReady?.({
+              originCoords: [originLatLng.lat, originLatLng.lng],
+              destinationCoords: [destinationLatLng.lat, destinationLatLng.lng],
+              routeDistanceKm: null,
+              routeDurationMin: null,
+              routeStatus: 'failed',
+            });
             setMapState('fallback');
           },
         );
       } catch {
-        if (!cancelled) setMapState('fallback');
+        if (!cancelled) {
+          onRouteReady?.({
+            originCoords: activeOrigin,
+            destinationCoords: activeDestination,
+            routeDistanceKm: null,
+            routeDurationMin: null,
+            routeStatus: 'failed',
+          });
+          setMapState('fallback');
+        }
       }
     }
 
