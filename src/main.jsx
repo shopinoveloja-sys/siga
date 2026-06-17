@@ -63,6 +63,7 @@ const initialRide = {
   ratePerKm: null,
   assignedDriverName: null,
   assignedDriverDistanceKm: null,
+  assignedDriverId: null,
   fareReferenceDriverName: null,
   fareReferenceDriverDistanceKm: null,
   originCoords: null,
@@ -282,7 +283,20 @@ function App() {
   const [mode, setMode] = useState('passenger');
   const [passengerStage, setPassengerStage] = useState('home');
   const [selectedRide, setSelectedRide] = useState(1);
-  const [online, setOnline] = useState(true);
+  const [online, setOnline] = useState(false);
+  const [driverIdentity] = useState(() => {
+    try {
+      const storageKey = 'siga-driver-id';
+      let id = window.localStorage.getItem(storageKey);
+      if (!id) {
+        id = `driver-${window.crypto?.randomUUID?.() || Date.now()}`;
+        window.localStorage.setItem(storageKey, id);
+      }
+      return { id, name: 'Motorista SIGA' };
+    } catch {
+      return { id: `driver-${Date.now()}`, name: 'Motorista SIGA' };
+    }
+  });
   const [origin, setOrigin] = useState('Seu local');
   const [destination, setDestination] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
@@ -325,7 +339,7 @@ function App() {
     if (ride.status === 'arrived') return 'Iniciar corrida';
     if (ride.status === 'started') return 'Finalizar corrida';
     if (ride.status === 'completed' || ride.status === 'cancelled') return 'Limpar simulação';
-    return online ? 'Receber corridas' : 'Ficar online';
+    return online ? 'Ficar offline' : 'Ficar online';
   }, [activeRide, canRequestRide, isPassenger, online, ride.status]);
 
   useEffect(() => {
@@ -415,8 +429,8 @@ function App() {
       const coords = [position.coords.latitude, position.coords.longitude];
       setDriverLocationStatus('active');
       const payload = {
-        id: 'driver-live',
-        name: 'Motorista SIGA',
+        id: driverIdentity.id,
+        name: driverIdentity.name,
         coords,
         online,
       };
@@ -443,7 +457,24 @@ function App() {
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [entered, isPassenger, online, socket]);
+  }, [driverIdentity, entered, isPassenger, online, socket]);
+
+  useEffect(() => {
+    if (!entered || isPassenger || online) return;
+
+    setDriverLocationStatus('idle');
+    const payload = {
+      id: driverIdentity.id,
+      name: driverIdentity.name,
+      online: false,
+    };
+    socket?.emit('driver:location', payload);
+    fetch('/api/driver/location', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+  }, [driverIdentity, entered, isPassenger, online, socket]);
 
   useEffect(() => {
     if (!isPassenger || !destination.trim() || !estimate.isReady || estimate.hasDriver) {
@@ -522,9 +553,14 @@ function App() {
       cancelled: 'ride:reset',
     };
     const event = eventByStatus[ride.status];
+    if (!event && ride.status === 'idle') {
+      setOnline(false);
+      return;
+    }
     if (event === 'ride:accept') {
-      const acceptingDriver = driverLocations[0];
+      const acceptingDriver = driverLocations.find((driver) => driver.id === driverIdentity.id) || driverLocations[0];
       emitRide(event, {
+        driverId: acceptingDriver?.id || driverIdentity.id,
         driverName: acceptingDriver?.name || 'Motorista SIGA',
         driverDistanceKm: acceptingDriver?.coords && ride.originCoords
           ? distanceBetweenKm(ride.originCoords, acceptingDriver.coords).toFixed(1)
@@ -583,8 +619,9 @@ function App() {
         setOnline={setOnline}
         driverLocationStatus={driverLocationStatus}
         driverLocations={driverLocations}
-        connected={connected}
-        cta={cta}
+      connected={connected}
+      driverIdentity={driverIdentity}
+      cta={cta}
         onMainAction={handleMainAction}
         emitRide={emitRide}
       />
@@ -598,6 +635,7 @@ function App() {
       connected={connected}
       destination={destination}
       driverLocations={driverLocations}
+      driverIdentity={driverIdentity}
       driverSearchExpired={driverSearchExpired}
       driverSearchRemainingSeconds={driverSearchRemainingSeconds}
       emitRide={emitRide}
@@ -842,6 +880,7 @@ function PassengerAppExperience({
   canRequestRide,
   connected,
   destination,
+  driverIdentity,
   driverLocations,
   driverSearchExpired,
   driverSearchRemainingSeconds,
@@ -995,7 +1034,12 @@ function PassengerAppExperience({
       <main className="passenger-dark-page">
         <section className="passenger-screen">
           <div className="requested-map">
-            <RouteMap origin={ride.origin} destination={ride.destination} ride={ride} />
+            <RouteMap
+              origin={ride.origin}
+              destination={ride.destination}
+              ride={ride}
+              driverLocations={driverLocations}
+            />
             <button className="map-back"><ChevronRight size={22} /></button>
           </div>
           <section className="requested-sheet">
@@ -1127,6 +1171,7 @@ function DriverMapExperience({
   cta,
   onMainAction,
   emitRide,
+  driverIdentity,
   driverLocations,
   driverLocationStatus,
 }) {
@@ -1143,7 +1188,7 @@ function DriverMapExperience({
   return (
     <main className="driver-map-page">
       <section className="driver-map-screen" aria-label="Mapa do motorista SIGA">
-        <DriverDemandMap ride={ride} driverLocations={driverLocations} />
+        <DriverDemandMap ride={ride} driverIdentity={driverIdentity} driverLocations={driverLocations} />
 
         <div className="driver-map-top">
           <button className="driver-floating-button" aria-label="Inicio"><Home size={22} /></button>
@@ -1184,7 +1229,7 @@ function DriverMapExperience({
   );
 }
 
-function DriverDemandMap({ ride, driverLocations = [] }) {
+function DriverDemandMap({ ride, driverIdentity, driverLocations = [] }) {
   const mapNodeRef = useRef(null);
   const mapRef = useRef(null);
   const directionsRef = useRef(null);
@@ -1196,7 +1241,10 @@ function DriverDemandMap({ ride, driverLocations = [] }) {
     const hasTrip = ride.status !== 'idle';
     const originCoords = ride.originCoords || fallbackCoords(ride.origin || initialRide.origin, 0);
     const destinationCoords = ride.destinationCoords || fallbackCoords(ride.destination || initialRide.destination, 1);
-    const liveDriver = driverLocations.find((driver) => driver.name === ride.assignedDriverName) || driverLocations[0];
+    const liveDriver = driverLocations.find((driver) => driver.id === ride.assignedDriverId)
+      || driverLocations.find((driver) => driver.id === driverIdentity?.id)
+      || driverLocations.find((driver) => driver.name === ride.assignedDriverName)
+      || driverLocations[0];
     const driverCoords = liveDriver?.coords || simulatedDrivers[0].coords;
 
     async function drawDriverMap() {
@@ -1314,7 +1362,9 @@ function DriverDemandMap({ ride, driverLocations = [] }) {
     ride.destination,
     ride.originCoords,
     ride.destinationCoords,
+    ride.assignedDriverId,
     ride.assignedDriverName,
+    driverIdentity?.id,
     driverLocations,
   ]);
 
@@ -1431,16 +1481,21 @@ function Quality({ icon: Icon, label, value }) {
   );
 }
 
-function RouteMap({ origin, destination, ride, onRouteReady }) {
+function RouteMap({ origin, destination, ride, onRouteReady, driverLocations = [] }) {
   const mapNodeRef = useRef(null);
   const mapRef = useRef(null);
   const directionsRef = useRef(null);
+  const driverMarkerRef = useRef(null);
   const [mapState, setMapState] = useState('loading');
 
   useEffect(() => {
     let cancelled = false;
     const activeOrigin = ride.originCoords || fallbackCoords(origin || '', 0);
     const activeDestination = ride.destinationCoords || fallbackCoords(destination || '', 1);
+    const liveDriver = ['accepted', 'arrived', 'started'].includes(ride.status)
+      ? driverLocations.find((driver) => driver.id === ride.assignedDriverId)
+        || driverLocations.find((driver) => driver.name === ride.assignedDriverName)
+      : null;
 
     onRouteReady?.({ originCoords: activeOrigin, destinationCoords: activeDestination });
 
@@ -1512,6 +1567,31 @@ function RouteMap({ origin, destination, ride, onRouteReady }) {
           });
         }
 
+        if (driverMarkerRef.current) {
+          driverMarkerRef.current.setMap(null);
+          driverMarkerRef.current = null;
+        }
+
+        const driverLatLng = liveDriver?.coords
+          ? { lat: liveDriver.coords[0], lng: liveDriver.coords[1] }
+          : null;
+        if (driverLatLng) {
+          driverMarkerRef.current = new maps.Marker({
+            position: driverLatLng,
+            map: mapRef.current,
+            title: liveDriver.name || 'Motorista SIGA',
+            label: { text: 'M', color: '#ffffff', fontWeight: '900' },
+            icon: {
+              path: maps.SymbolPath.CIRCLE,
+              scale: 15,
+              fillColor: '#111111',
+              fillOpacity: 1,
+              strokeColor: '#e5092d',
+              strokeWeight: 4,
+            },
+          });
+        }
+
         if (!destination?.trim() && !ride.destinationCoords) {
           directionsRef.current.set('directions', null);
           new maps.Marker({ position: originLatLng, map: mapRef.current, title: 'Origem SIGA' });
@@ -1532,6 +1612,16 @@ function RouteMap({ origin, destination, ride, onRouteReady }) {
             if (status === 'OK' && result) {
               directionsRef.current.setDirections(result);
               const leg = result.routes?.[0]?.legs?.[0];
+              if (driverLatLng) {
+                window.setTimeout(() => {
+                  if (!mapRef.current || cancelled) return;
+                  const bounds = new maps.LatLngBounds();
+                  bounds.extend(driverLatLng);
+                  bounds.extend(originLatLng);
+                  bounds.extend(destinationLatLng);
+                  mapRef.current.fitBounds(bounds, 72);
+                }, 120);
+              }
               onRouteReady?.({
                 originCoords: [originLatLng.lat, originLatLng.lng],
                 destinationCoords: [destinationLatLng.lat, destinationLatLng.lng],
@@ -1555,7 +1645,17 @@ function RouteMap({ origin, destination, ride, onRouteReady }) {
     return () => {
       cancelled = true;
     };
-  }, [origin, destination, ride.originCoords, ride.destinationCoords, onRouteReady]);
+  }, [
+    origin,
+    destination,
+    ride.originCoords,
+    ride.destinationCoords,
+    ride.status,
+    ride.assignedDriverId,
+    ride.assignedDriverName,
+    driverLocations,
+    onRouteReady,
+  ]);
 
   return (
     <>

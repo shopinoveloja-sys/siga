@@ -32,6 +32,7 @@ const initialRide = {
   ratePerKm: null,
   assignedDriverName: null,
   assignedDriverDistanceKm: null,
+  assignedDriverId: null,
   fareReferenceDriverName: null,
   fareReferenceDriverDistanceKm: null,
   originCoords: null,
@@ -67,6 +68,20 @@ function updateRide(next) {
   publish();
 }
 
+function distanceBetweenKm(a, b) {
+  if (!a || !b) return 0;
+  const toRad = (value) => (value * Math.PI) / 180;
+  const earthRadius = 6371;
+  const dLat = toRad(b[0] - a[0]);
+  const dLon = toRad(b[1] - a[1]);
+  const lat1 = toRad(a[0]);
+  const lat2 = toRad(b[0]);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * earthRadius * Math.asin(Math.sqrt(h));
+}
+
 function applyRideEvent(event, payload = {}) {
   if (event === 'ride:request') {
     updateRide({
@@ -84,6 +99,7 @@ function applyRideEvent(event, payload = {}) {
       ratePerKm: payload.ratePerKm || '3.10',
       assignedDriverName: null,
       assignedDriverDistanceKm: null,
+      assignedDriverId: null,
       fareReferenceDriverName: payload.fareReferenceDriverName || payload.assignedDriverName || null,
       fareReferenceDriverDistanceKm: payload.fareReferenceDriverDistanceKm || payload.assignedDriverDistanceKm || payload.pickupDistanceKm || '5.0',
       originCoords: payload.originCoords || null,
@@ -98,6 +114,7 @@ function applyRideEvent(event, payload = {}) {
     const driverName = payload.driverName || payload.name || 'Motorista SIGA';
     updateRide({
       status: 'accepted',
+      assignedDriverId: payload.driverId || null,
       assignedDriverName: driverName,
       assignedDriverDistanceKm: payload.driverDistanceKm || null,
       driver: driverName,
@@ -137,11 +154,25 @@ function applyRideEvent(event, payload = {}) {
 
 function updateDriverLocation(payload = {}) {
   const coords = Array.isArray(payload.coords) ? payload.coords.map(Number) : null;
+  const id = payload.id || 'driver-live';
+
+  if (payload.online === false) {
+    drivers[id] = {
+      ...(drivers[id] || {}),
+      id,
+      name: payload.name || drivers[id]?.name || 'Motorista SIGA',
+      coords: drivers[id]?.coords || null,
+      online: false,
+      updatedAt: Date.now(),
+    };
+    publishDrivers();
+    return true;
+  }
+
   if (!coords || coords.length !== 2 || coords.some((value) => Number.isNaN(value))) {
     return false;
   }
 
-  const id = payload.id || 'driver-live';
   drivers[id] = {
     id,
     name: payload.name || 'Motorista SIGA',
@@ -150,6 +181,20 @@ function updateDriverLocation(payload = {}) {
     updatedAt: Date.now(),
   };
   publishDrivers();
+
+  const isAcceptedDriver = ride.assignedDriverId
+    ? ride.assignedDriverId === id
+    : ride.assignedDriverName && ride.assignedDriverName === drivers[id].name;
+  if (ride.status === 'accepted' && isAcceptedDriver && ride.originCoords) {
+    const distanceToPickupKm = distanceBetweenKm(ride.originCoords, coords);
+    if (distanceToPickupKm <= 0.02) {
+      updateRide({
+        status: 'arrived',
+        assignedDriverDistanceKm: distanceToPickupKm.toFixed(2),
+      });
+    }
+  }
+
   return true;
 }
 
