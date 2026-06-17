@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { io } from 'socket.io-client';
 import {
@@ -359,6 +359,12 @@ function App() {
     [origin, destination, activeRide, routePreview, userLocationCoords, driverLocations, driverSearchExpired],
   );
   const canRequestRide = estimate.isReady && estimate.hasDriver && paymentMethod;
+  const mergeRoutePreview = useCallback((nextPreview) => {
+    setRoutePreview((current) => ({
+      ...(current || {}),
+      ...(nextPreview || {}),
+    }));
+  }, []);
 
   const cta = useMemo(() => {
     if (isPassenger) {
@@ -770,7 +776,7 @@ function App() {
       setDestinationPlace={selectDestinationPlace}
       setPassengerStage={setPassengerStage}
       setPaymentMethod={setPaymentMethod}
-      setRoutePreview={setRoutePreview}
+      setRoutePreview={mergeRoutePreview}
       setSelectedRide={setSelectedRide}
       userLocationCoords={userLocationCoords}
     />
