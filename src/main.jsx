@@ -314,6 +314,27 @@ function estimateRouteWithDriver(origin, destination, ride, routePreview, availa
   };
 }
 
+function routeFareKey(origin, destination, routePreview = {}) {
+  const originKey = isCurrentLocationLabel(origin)
+    ? 'current-location'
+    : origin.trim().toLowerCase();
+  const destinationKey = routePreview.destinationCoords
+    ? routePreview.destinationCoords.map((value) => Number(value).toFixed(5)).join(',')
+    : destination.trim().toLowerCase();
+  return `${originKey}|${destinationKey}`;
+}
+
+function buildOfficialEstimate(baseEstimate, rideOption) {
+  const billableKm = Number(baseEstimate.billableKm);
+  const priceNumber = billableKm * rideOption.ratePerKm;
+  return {
+    ...baseEstimate,
+    ratePerKm: rideOption.ratePerKm,
+    priceNumber,
+    price: priceNumber.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+  };
+}
+
 function App() {
   const [entered, setEntered] = useState(false);
   const [mode, setMode] = useState('passenger');
@@ -337,6 +358,7 @@ function App() {
   const [destination, setDestination] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [routePreview, setRoutePreview] = useState(null);
+  const [officialFares, setOfficialFares] = useState({});
   const [userLocationCoords, setUserLocationCoords] = useState(null);
   const [driverLocations, setDriverLocations] = useState([]);
   const [driverLocationStatus, setDriverLocationStatus] = useState('idle');
@@ -351,13 +373,15 @@ function App() {
   const driverSearchRemainingSeconds = driverSearchStartedAt
     ? Math.max(0, Math.ceil((120000 - (now - driverSearchStartedAt)) / 1000))
     : 120;
-  const estimate = useMemo(
+  const fareKey = useMemo(() => routeFareKey(origin, destination, routePreview || {}), [destination, origin, routePreview]);
+  const rawEstimate = useMemo(
     () => estimateRouteWithDriver(origin, destination, activeRide, {
       ...routePreview,
       originCoords: userLocationCoords || routePreview?.originCoords,
     }, driverLocations, driverSearchExpired),
     [origin, destination, activeRide, routePreview, userLocationCoords, driverLocations, driverSearchExpired],
   );
+  const estimate = officialFares[fareKey]?.[activeRide.name] || rawEstimate;
   const canRequestRide = estimate.isReady && estimate.hasDriver && paymentMethod;
   const mergeRoutePreview = useCallback((nextPreview) => {
     setRoutePreview((current) => ({
@@ -403,6 +427,19 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!rawEstimate.isReady || !rawEstimate.hasDriver || officialFares[fareKey]) return;
+
+    const lockedByRide = rideOptions.reduce((acc, rideOption) => {
+      acc[rideOption.name] = buildOfficialEstimate(rawEstimate, rideOption);
+      return acc;
+    }, {});
+    setOfficialFares((current) => ({
+      ...current,
+      [fareKey]: lockedByRide,
+    }));
+  }, [fareKey, officialFares, rawEstimate]);
+
+  useEffect(() => {
     if (!entered || !isPassenger) return undefined;
     if (!navigator.geolocation) {
       setRoutePreview((current) => ({
@@ -428,9 +465,11 @@ function App() {
         setRoutePreview((current) => ({
           ...current,
           originCoords: coords,
-          routeDistanceKm: null,
-          routeDurationMin: null,
-          routeStatus: destination.trim() ? 'loading' : 'idle',
+          routeDistanceKm: current?.routeDistanceKm || null,
+          routeDurationMin: current?.routeDurationMin || null,
+          routeStatus: current?.routeStatus === 'ready'
+            ? 'ready'
+            : destination.trim() ? 'loading' : 'idle',
         }));
       },
       () => {
@@ -763,7 +802,9 @@ function App() {
       driverSearchRemainingSeconds={driverSearchRemainingSeconds}
       emitRide={emitRide}
       estimate={estimate}
+      fareKey={fareKey}
       onMainAction={handleMainAction}
+      officialFares={officialFares}
       origin={origin}
       passengerStage={passengerStage}
       paymentMethod={paymentMethod}
@@ -1109,7 +1150,9 @@ function PassengerAppExperience({
   driverSearchExpired,
   driverSearchRemainingSeconds,
   estimate,
+  fareKey,
   onMainAction,
+  officialFares,
   origin,
   passengerStage,
   paymentMethod,
@@ -1216,7 +1259,7 @@ function PassengerAppExperience({
             <h1>Escolher uma viagem</h1>
             <div className="ride-choice-list">
               {rideOptions.map((rideOption, index) => {
-                const optionEstimate = estimateRouteWithDriver(origin, destination, rideOption, {
+                const optionEstimate = officialFares[fareKey]?.[rideOption.name] || estimateRouteWithDriver(origin, destination, rideOption, {
                   ...routePreview,
                   originCoords: userLocationCoords || routePreview?.originCoords,
                 }, driverLocations, driverSearchExpired);
