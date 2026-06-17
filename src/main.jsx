@@ -1015,15 +1015,146 @@ function DriverMapExperience({ ride, online, setOnline, connected, cta, onMainAc
 }
 
 function DriverDemandMap({ ride }) {
+  const mapNodeRef = useRef(null);
+  const mapRef = useRef(null);
+  const directionsRef = useRef(null);
+  const markersRef = useRef([]);
+  const [mapState, setMapState] = useState('loading');
+
+  useEffect(() => {
+    let cancelled = false;
+    const hasTrip = ride.status !== 'idle';
+    const originCoords = ride.originCoords || fallbackCoords(ride.origin || initialRide.origin, 0);
+    const destinationCoords = ride.destinationCoords || fallbackCoords(ride.destination || initialRide.destination, 1);
+    const driverCoords = ride.assignedDriverName
+      ? simulatedDrivers.find((driver) => driver.name === ride.assignedDriverName)?.coords || simulatedDrivers[0].coords
+      : simulatedDrivers[0].coords;
+
+    async function drawDriverMap() {
+      if (!mapNodeRef.current) return;
+
+      try {
+        setMapState('loading');
+        const maps = await loadGoogleMaps();
+        if (cancelled || !mapNodeRef.current) return;
+
+        const toLatLng = (coords) => ({ lat: coords[0], lng: coords[1] });
+        const originLatLng = toLatLng(originCoords);
+        const destinationLatLng = toLatLng(destinationCoords);
+        const driverLatLng = toLatLng(driverCoords);
+
+        if (!mapRef.current) {
+          mapRef.current = new maps.Map(mapNodeRef.current, {
+            center: hasTrip ? originLatLng : driverLatLng,
+            zoom: hasTrip ? 13 : 12,
+            disableDefaultUI: true,
+            clickableIcons: false,
+            gestureHandling: 'greedy',
+            styles: [
+              { featureType: 'poi.business', stylers: [{ visibility: 'off' }] },
+              { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+              { featureType: 'road', elementType: 'geometry', stylers: [{ saturation: -18 }] },
+              { featureType: 'water', stylers: [{ color: '#b8dcf4' }] },
+            ],
+          });
+        }
+
+        markersRef.current.forEach((marker) => marker.setMap(null));
+        markersRef.current = [];
+
+        if (!directionsRef.current) {
+          directionsRef.current = new maps.DirectionsRenderer({
+            map: mapRef.current,
+            suppressMarkers: true,
+            polylineOptions: {
+              strokeColor: '#e5092d',
+              strokeOpacity: 0.96,
+              strokeWeight: 6,
+            },
+          });
+        }
+
+        const makeMarker = (position, label, title, color) => {
+          const marker = new maps.Marker({
+            position,
+            map: mapRef.current,
+            title,
+            label: { text: label, color: '#ffffff', fontWeight: '900' },
+            icon: {
+              path: maps.SymbolPath.CIRCLE,
+              scale: 15,
+              fillColor: color,
+              fillOpacity: 1,
+              strokeColor: '#ffffff',
+              strokeWeight: 4,
+            },
+          });
+          markersRef.current.push(marker);
+        };
+
+        makeMarker(driverLatLng, 'M', ride.assignedDriverName || 'Motorista SIGA', '#111111');
+
+        if (!hasTrip) {
+          directionsRef.current.set('directions', null);
+          mapRef.current.setCenter(driverLatLng);
+          mapRef.current.setZoom(12);
+          setMapState('ready');
+          return;
+        }
+
+        makeMarker(originLatLng, 'A', ride.origin || 'Origem', '#e5092d');
+        makeMarker(destinationLatLng, 'B', ride.destination || 'Destino', '#191114');
+
+        const directionsService = new maps.DirectionsService();
+        directionsService.route(
+          {
+            origin: originLatLng,
+            destination: destinationLatLng,
+            travelMode: maps.TravelMode.DRIVING,
+          },
+          (result, status) => {
+            if (cancelled) return;
+
+            if (status === 'OK' && result) {
+              directionsRef.current.setDirections(result);
+              setMapState('ready');
+              return;
+            }
+
+            const bounds = new maps.LatLngBounds();
+            bounds.extend(originLatLng);
+            bounds.extend(destinationLatLng);
+            bounds.extend(driverLatLng);
+            mapRef.current.fitBounds(bounds, 72);
+            setMapState('ready');
+          },
+        );
+      } catch {
+        if (!cancelled) setMapState('fallback');
+      }
+    }
+
+    drawDriverMap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    ride.status,
+    ride.origin,
+    ride.destination,
+    ride.originCoords,
+    ride.destinationCoords,
+    ride.assignedDriverName,
+  ]);
+
   return (
     <div className="driver-demand-map">
-      <span className="demand-water demand-water-one" />
-      <span className="demand-water demand-water-two" />
-      <span className="demand-park demand-park-one" />
-      <span className="demand-park demand-park-two" />
-      <span className="demand-road demand-road-one" />
-      <span className="demand-road demand-road-two" />
-      <span className="demand-road demand-road-three" />
+      <div className="driver-google-map" ref={mapNodeRef} />
+      {mapState === 'loading' && <div className="driver-map-message">Carregando ruas reais...</div>}
+      {mapState === 'fallback' && (
+        <div className="driver-map-message warning">Nao foi possivel carregar o Google Maps agora.</div>
+      )}
       <span className="heat heat-one" />
       <span className="heat heat-two" />
       <span className="heat heat-three" />
@@ -1033,19 +1164,6 @@ function DriverDemandMap({ ride }) {
       <span className="bonus bonus-three">+R$ 9,50</span>
       <span className="bonus bonus-four">+R$ 20</span>
       <span className="bonus bonus-five">+R$ 2</span>
-      <span className="driver-position"><Navigation2 size={28} /></span>
-      {ride.status !== 'idle' && (
-        <>
-          <svg className="driver-trip-route" viewBox="0 0 360 680" preserveAspectRatio="none">
-            <path d="M180 330 C210 282 235 240 260 192 S304 104 316 58" />
-          </svg>
-          <span className="pickup-pin">A</span>
-          <span className="dropoff-pin">B</span>
-        </>
-      )}
-      <span className="map-place place-one">Aeroporto</span>
-      <span className="map-place place-two">Centro</span>
-      <span className="map-place place-three">Campo</span>
     </div>
   );
 }
