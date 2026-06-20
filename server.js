@@ -258,6 +258,12 @@ app.get('/manifest-passageiro.webmanifest', (_req, res) => {
     orientation: 'portrait',
     icons: [
       {
+        src: '/icons/siga-passenger-512.png',
+        sizes: '512x512',
+        type: 'image/png',
+        purpose: 'any maskable',
+      },
+      {
         src: '/icons/siga-passenger.svg',
         sizes: 'any',
         type: 'image/svg+xml',
@@ -279,6 +285,12 @@ app.get('/manifest-motorista.webmanifest', (_req, res) => {
     theme_color: '#e3132c',
     orientation: 'portrait',
     icons: [
+      {
+        src: '/icons/siga-driver-512.png',
+        sizes: '512x512',
+        type: 'image/png',
+        purpose: 'any maskable',
+      },
       {
         src: '/icons/siga-driver.svg',
         sizes: 'any',

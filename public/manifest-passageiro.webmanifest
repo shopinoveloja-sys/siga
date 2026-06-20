@@ -10,6 +10,12 @@
   "orientation": "portrait",
   "icons": [
     {
+      "src": "/icons/siga-passenger-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
       "src": "/icons/siga-passenger.svg",
       "sizes": "any",
       "type": "image/svg+xml",
