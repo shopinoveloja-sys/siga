@@ -50,6 +50,42 @@ const rideLabels = {
   cancelled: 'Corrida cancelada',
 };
 
+const appEntrypoints = {
+  passenger: {
+    path: '/passageiro',
+    title: 'SIGA | Passageiro',
+    manifest: '/manifest-passageiro.webmanifest',
+  },
+  driver: {
+    path: '/motorista',
+    title: 'SIGA Driver | Motorista',
+    manifest: '/manifest-motorista.webmanifest',
+  },
+};
+
+function modeFromPath(pathname = window.location.pathname) {
+  const normalized = pathname.toLowerCase();
+  if (normalized.startsWith('/motorista') || normalized.startsWith('/driver')) return 'driver';
+  if (normalized.startsWith('/passageiro') || normalized.startsWith('/passenger')) return 'passenger';
+  return null;
+}
+
+function syncInstallMetadata(mode) {
+  const entrypoint = appEntrypoints[mode] || appEntrypoints.passenger;
+  document.title = entrypoint.title;
+
+  const themeMeta = document.querySelector('meta[name="theme-color"]');
+  if (themeMeta) themeMeta.setAttribute('content', '#e3132c');
+
+  let manifestLink = document.querySelector('link[rel="manifest"]');
+  if (!manifestLink) {
+    manifestLink = document.createElement('link');
+    manifestLink.setAttribute('rel', 'manifest');
+    document.head.appendChild(manifestLink);
+  }
+  manifestLink.setAttribute('href', entrypoint.manifest);
+}
+
 const initialRide = {
   status: 'idle',
   category: null,
@@ -344,8 +380,9 @@ function buildOfficialEstimate(baseEstimate, rideOption) {
 }
 
 function App() {
-  const [entered, setEntered] = useState(false);
-  const [mode, setMode] = useState('passenger');
+  const initialMode = modeFromPath();
+  const [entered, setEntered] = useState(Boolean(initialMode));
+  const [mode, setMode] = useState(initialMode || 'passenger');
   const [passengerStage, setPassengerStage] = useState('home');
   const [selectedRide, setSelectedRide] = useState(1);
   const [online, setOnline] = useState(false);
@@ -396,6 +433,32 @@ function App() {
       ...(current || {}),
       ...(nextPreview || {}),
     }));
+  }, []);
+
+  const enterApp = useCallback((nextMode) => {
+    const entrypoint = appEntrypoints[nextMode] || appEntrypoints.passenger;
+    window.history.pushState({ sigaMode: nextMode }, '', entrypoint.path);
+    setMode(nextMode);
+    setEntered(true);
+  }, []);
+
+  useEffect(() => {
+    syncInstallMetadata(mode);
+  }, [mode]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const nextMode = modeFromPath();
+      if (nextMode) {
+        setMode(nextMode);
+        setEntered(true);
+        return;
+      }
+      setEntered(false);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   const cta = useMemo(() => {
@@ -776,19 +839,13 @@ function App() {
           </div>
           <div className="entry-actions" aria-label="Entrar no aplicativo">
             <button
-              onClick={() => {
-                setMode('passenger');
-                setEntered(true);
-              }}
+              onClick={() => enterApp('passenger')}
             >
               <UserRound size={20} />
               Passageiro
             </button>
             <button
-              onClick={() => {
-                setMode('driver');
-                setEntered(true);
-              }}
+              onClick={() => enterApp('driver')}
             >
               <CarFront size={20} />
               Motorista

@@ -245,6 +245,50 @@ app.get('/api/config', (_req, res) => {
   });
 });
 
+app.get('/manifest-passageiro.webmanifest', (_req, res) => {
+  res.json({
+    name: 'SIGA Passageiro',
+    short_name: 'SIGA',
+    description: 'Aplicativo SIGA para solicitar corridas.',
+    start_url: '/passageiro',
+    scope: '/passageiro',
+    display: 'standalone',
+    background_color: '#e3132c',
+    theme_color: '#e3132c',
+    orientation: 'portrait',
+    icons: [
+      {
+        src: '/icons/siga-passenger.svg',
+        sizes: 'any',
+        type: 'image/svg+xml',
+        purpose: 'any maskable',
+      },
+    ],
+  });
+});
+
+app.get('/manifest-motorista.webmanifest', (_req, res) => {
+  res.json({
+    name: 'SIGA Driver',
+    short_name: 'SIGA Driver',
+    description: 'Aplicativo SIGA para motoristas parceiros.',
+    start_url: '/motorista',
+    scope: '/motorista',
+    display: 'standalone',
+    background_color: '#e3132c',
+    theme_color: '#e3132c',
+    orientation: 'portrait',
+    icons: [
+      {
+        src: '/icons/siga-driver.svg',
+        sizes: 'any',
+        type: 'image/svg+xml',
+        purpose: 'any maskable',
+      },
+    ],
+  });
+});
+
 app.get('/api/ride', (_req, res) => {
   res.json(ride);
 });
