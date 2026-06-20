@@ -1,0 +1,26 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "br.com.siga.passageiro",
+      "sha256_cert_fingerprints": [
+        "B6:CF:9B:A0:2A:11:D8:05:9B:8B:BD:92:F8:95:77:AA:C3:01:FE:5C:F8:D5:A6:BA:7E:62:ED:94:DC:61:72:4E"
+      ]
+    }
+  },
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "br.com.siga.driver",
+      "sha256_cert_fingerprints": [
+        "E8:70:83:4A:6F:A3:CC:B3:1B:AD:FC:F0:BA:03:30:35:15:36:88:95:89:2B:91:E4:8F:B0:7F:FE:F3:5B:8D:3F"
+      ]
+    }
+  }
+]

@@ -7,3 +7,12 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# Android release signing and build outputs
+android/signing/
+android/**/.gradle/
+android/**/build/
+android/**/app/build/
+android/**/*.apk
+android/**/*.aab
+android/**/local.properties

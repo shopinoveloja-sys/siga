@@ -1,0 +1,45 @@
+{
+  "packageId": "br.com.siga.passageiro",
+  "host": "siga.72.60.50.169.sslip.io",
+  "name": "SIGA Passageiro",
+  "launcherName": "SIGA",
+  "display": "standalone",
+  "themeColor": "#e3132c",
+  "themeColorDark": "#9f0618",
+  "navigationColor": "#000000",
+  "navigationColorDark": "#000000",
+  "navigationDividerColor": "#000000",
+  "navigationDividerColorDark": "#000000",
+  "backgroundColor": "#e3132c",
+  "enableNotifications": true,
+  "startUrl": "/passageiro",
+  "iconUrl": "https://siga.72.60.50.169.sslip.io/icons/siga-passenger-512.png",
+  "maskableIconUrl": "https://siga.72.60.50.169.sslip.io/icons/siga-passenger-512.png",
+  "monochromeIconUrl": "https://siga.72.60.50.169.sslip.io/icons/siga-passenger-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "../signing/siga-upload.keystore",
+    "alias": "siga_passageiro"
+  },
+  "appVersion": "1.0.0",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://siga.72.60.50.169.sslip.io/manifest-passageiro.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {
+    "locationDelegation": {
+      "enabled": true
+    }
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://siga.72.60.50.169.sslip.io/passageiro",
+  "minSdkVersion": 23,
+  "orientation": "portrait",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "displayOverride": []
+}
